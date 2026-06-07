@@ -19,7 +19,7 @@ export const K = 16; // security parameter / block half
 export const MAX_HOPS = 5;
 export const R = MAX_HOPS;
 export const BETA_LEN = (2 * R + 1) * K; // 176
-export const PAYLOAD_LEN = 1024;
+export const PAYLOAD_LEN = 2048; // holds a full ML-KEM-768 ciphertext (1088B) + content
 export const HOP_ID_LEN = K; // 16
 export const HEADER_LEN = 32 + BETA_LEN + K; // alpha + beta + gamma
 
