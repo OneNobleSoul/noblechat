@@ -24,25 +24,53 @@ nothing to scan and nothing to hand over — which is the point.
 
 ## Status
 
-Early, built in the open. Cryptographic core first, and every piece is tested.
+Working end to end, built in the open. Every layer is tested.
 
 | Component | What it does | State |
 |-----------|--------------|-------|
 | `packages/crypto` | hybrid X25519+ML-KEM exchange, XChaCha20-Poly1305, Ed25519+ML-DSA signatures | ✅ tested |
-| `packages/sphinx` | Sphinx-style onion packet: fixed size, per-hop key blinding, per-hop MAC, payload onion | ✅ tested |
-| `apps/mixnode` | mix node: peel a layer, Poisson delay, forward | ⏳ next |
-| `apps/provider` | gateway / mailbox for offline delivery | ⏳ next |
-| `apps/directory` | network directory: mix nodes, layers, keys | ⏳ next |
-| `apps/client` | build packets, run cover-traffic loops, send/receive | ⏳ next |
-| `apps/web` | the actual chat UI + a live view of the mixnet | ⏳ next |
+| `packages/sphinx` | Sphinx onion packet: fixed size, per-hop key blinding, per-hop MAC, payload onion | ✅ tested |
+| `packages/protocol` | end-to-end envelope, addressing, wire framing | ✅ tested |
+| `packages/net` | layered mix router with Poisson mixing, provider mailboxes, cover-traffic loops | ✅ tested |
+| `apps/server` | zero-knowledge gateway + local testnet + public key directory | ✅ working |
+| `apps/web` | the chat UI + a live view of packets moving through the mix layers | ✅ working |
 
-Run the tests:
+## Run it
 
 ```bash
 npm install
-node packages/crypto/test.js
-node packages/sphinx/test.js
+npm start          # builds the web client and starts the gateway on :8790
 ```
+
+Then open **http://localhost:8790** in two browser tabs (or two browsers):
+
+1. In each tab, pick a handle (e.g. `kirito` and `asuna`). Keys are generated
+   locally in that tab.
+2. In one tab, add the other by their handle and start chatting.
+3. Flip **cover: on** to emit indistinguishable dummy packets, and watch the
+   MIX NETWORK panel light up as packets hop through the layers.
+
+Run the tests / the headless end-to-end check:
+
+```bash
+npm test           # 12 unit + integration tests
+npm run smoke      # two clients exchange messages through the live gateway
+```
+
+## How a message travels
+
+```
+you ──[hybrid PQ E2E encrypt]──► [ mailboxId | envelope ]
+    ──[wrap in a fixed-size Sphinx onion for a random path]──►
+      mix L1 ─(delay)─► mix L2 ─(delay)─► mix L3 ─(delay)─► provider
+                                                              └─► recipient's mailbox ──► recipient decrypts
+```
+
+Each mix node peels exactly one layer, learns only the next hop, waits a random
+(Poisson) delay and forwards. The gateway/provider only ever sees opaque, equal-
+sized packets and a mailbox to drop ciphertext into — never who sent it or what
+it says. Cover-traffic loops keep a steady stream flowing so *whether* you're
+talking is hidden too.
 
 ## Honest scope
 
