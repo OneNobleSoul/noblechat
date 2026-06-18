@@ -1,0 +1,4 @@
+node_modules
+.git
+*.log
+apps/web/public/app.bundle.js

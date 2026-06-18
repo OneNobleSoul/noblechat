@@ -1,0 +1,16 @@
+services:
+  noblechat:
+    build: .
+    container_name: noblechat
+    restart: unless-stopped
+    environment:
+      PORT: "8790"
+      MEAN_DELAY_MS: "60"
+    expose:
+      - "8790"
+    networks:
+      - jarvis20_default
+
+networks:
+  jarvis20_default:
+    external: true
