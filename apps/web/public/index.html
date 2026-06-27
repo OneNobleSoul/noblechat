@@ -13,15 +13,44 @@
 <body>
 <div class="bg-grid" aria-hidden="true"></div>
 
+<!-- ACCESS GATE (testing only) -->
+<div id="gate" class="gate">
+  <div class="gate-card">
+    <div class="logo">◆ NobleChat</div>
+    <p class="tag">This instance is in private testing.</p>
+    <label>Access password</label>
+    <input id="gate-input" type="password" placeholder="enter test password" autocomplete="off" spellcheck="false">
+    <button id="gate-go" class="btn">Unlock</button>
+    <p id="gate-err" class="err" hidden>Wrong password — try again.</p>
+    <p class="fine">Temporary gate while we test. It only limits who can open the page.</p>
+  </div>
+</div>
+
 <!-- SETUP (first run) -->
 <div id="setup" class="setup" hidden>
   <div class="setup-card">
     <div class="logo">◆ NobleChat</div>
     <p class="tag">Private messaging over a real mix network · hybrid post-quantum encryption</p>
-    <label>Pick a handle</label>
-    <input id="setup-handle" placeholder="e.g. kirito" autocomplete="off" spellcheck="false" maxlength="24">
-    <button id="setup-go" class="btn">Generate keys &amp; enter</button>
-    <p class="fine">Your keys are generated here in your browser and never leave it. The server only ever sees fixed-size onion packets.</p>
+
+    <div class="setup-form">
+      <label>Pick a handle</label>
+      <input id="setup-handle" placeholder="e.g. kirito" autocomplete="off" spellcheck="false" maxlength="24">
+      <button id="setup-go" class="btn">Generate keys &amp; enter</button>
+      <p id="setup-err" class="err" hidden></p>
+      <p class="fine">Your keys are generated here in your browser and never leave it. The server only ever sees fixed-size onion packets.</p>
+    </div>
+
+    <div id="keygen" class="keygen" hidden>
+      <div class="kg-ring">
+        <svg viewBox="0 0 120 120" aria-hidden="true">
+          <circle class="kg-track" cx="60" cy="60" r="52"></circle>
+          <circle class="kg-arc" cx="60" cy="60" r="52"></circle>
+        </svg>
+        <div class="kg-pct"><span id="kg-num">0</span><i>%</i></div>
+      </div>
+      <div id="kg-label" class="kg-label">generating keys…</div>
+      <div class="kg-sub">post-quantum keys are being generated locally in your browser</div>
+    </div>
   </div>
 </div>
 
@@ -77,6 +106,6 @@
 </div>
 
 <div id="toast" class="toast" hidden></div>
-<script src="/app.bundle.js"></script>
+<script src="/app.bundle.js?v=20260718"></script>
 </body>
 </html>

@@ -1,7 +1,7 @@
 // NobleChat browser client. All key generation and encryption happen HERE,
 // locally. The gateway only ever receives opaque, fixed-size onion packets.
 import {
-  generateIdentity, buildOutgoing, openIncoming, buildCoverLoop,
+  generateIdentityStaged, buildOutgoing, openIncoming, buildCoverLoop,
 } from "../../../packages/net/src/client.js";
 import {
   makeBrowserNet, serializePacket, serializeCard, deserializeCard,
@@ -12,6 +12,13 @@ import { toB64, fromB64 } from "../../../packages/crypto/src/util.js";
 const $ = (s) => document.querySelector(s);
 const ID_KEY = "noblechat:id";
 const CONTACTS_KEY = "noblechat:contacts";
+
+// --- temporary access gate (testing only) ---------------------------------
+// A client-side speed bump so the instance isn't wide open while we test.
+// GATE_HASH is the SHA-256 of the shared test password. This is NOT real
+// security (anyone can read the bundle) — it just keeps casual visitors out.
+const GATE_HASH = "b34f7fb73eea21931199bcd983951029b3df3ef407a7e58d617cf03747014f1a";
+const GATE_OK = "noblechat:gate-ok";
 
 const state = {
   ws: null, net: null, meanDelayMs: 60,
@@ -29,6 +36,47 @@ function toast(msg) {
 function simpleHash(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; }
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 function poisson(mean) { return -mean * Math.log(1 - Math.random()); }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function sha256Hex(str) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// ---------- boot / gate ----------
+async function boot() {
+  await passGate();
+  await init();
+}
+
+function passGate() {
+  return new Promise((resolve) => {
+    const g = $("#gate");
+    if (sessionStorage.getItem(GATE_OK) === "1") { g.hidden = true; resolve(); return; }
+    g.hidden = false;
+    const input = $("#gate-input"), btn = $("#gate-go"), err = $("#gate-err");
+    input.focus();
+    async function tryUnlock() {
+      const v = input.value;
+      if (!v) return;
+      btn.disabled = true;
+      let ok = false;
+      try { ok = (await sha256Hex(v)) === GATE_HASH; } catch { ok = false; }
+      if (ok) {
+        try { sessionStorage.setItem(GATE_OK, "1"); } catch {}
+        g.classList.add("gone");
+        setTimeout(() => { g.hidden = true; resolve(); }, 340);
+      } else {
+        err.hidden = false;
+        input.value = ""; input.focus();
+        g.classList.remove("shake"); void g.offsetWidth; g.classList.add("shake");
+        btn.disabled = false;
+      }
+    }
+    btn.addEventListener("click", tryUnlock);
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") tryUnlock(); });
+  });
+}
 
 // ---------- init ----------
 async function init() {
@@ -38,29 +86,74 @@ async function init() {
   state.meanDelayMs = meanDelayMs;
   buildNetViz();
 
-  const saved = localStorage.getItem(ID_KEY);
+  let saved = null;
+  try { saved = localStorage.getItem(ID_KEY); } catch {}
   if (saved) {
-    state.identity = deserializeIdentity(JSON.parse(saved));
-    loadContacts();
-    startApp();
-  } else {
-    $("#setup").hidden = false;
-    $("#setup-go").addEventListener("click", createIdentity);
-    $("#setup-handle").addEventListener("keydown", (e) => e.key === "Enter" && createIdentity());
+    try {
+      state.identity = deserializeIdentity(JSON.parse(saved));
+      loadContacts();
+      startApp();
+      return;
+    } catch {
+      // corrupt stored identity — fall through to a fresh setup
+      try { localStorage.removeItem(ID_KEY); } catch {}
+    }
   }
+  $("#setup").hidden = false;
+  $("#setup-go").addEventListener("click", createIdentity);
+  $("#setup-handle").addEventListener("keydown", (e) => e.key === "Enter" && createIdentity());
+  $("#setup-handle").focus();
 }
 
-function createIdentity() {
+// ---------- key generation with live progress ----------
+const KG_CIRC = 2 * Math.PI * 52; // stroke length of the progress ring
+
+function showKeygen(pct, label) {
+  $(".setup-card").classList.add("busy");
+  $("#keygen").hidden = false;
+  const p = Math.max(0, Math.min(100, pct));
+  const arc = $(".kg-arc");
+  arc.style.strokeDasharray = String(KG_CIRC);
+  arc.style.strokeDashoffset = String(KG_CIRC * (1 - p / 100));
+  $("#kg-num").textContent = String(Math.round(p));
+  if (label) $("#kg-label").textContent = label;
+}
+function resetSetupForm() {
+  $(".setup-card").classList.remove("busy");
+  $("#keygen").hidden = true;
+  $("#setup-go").disabled = false;
+}
+
+async function createIdentity() {
   const handle = $("#setup-handle").value.trim().toLowerCase().replace(/\s+/g, "");
-  if (!handle) return;
+  if (!handle) { $("#setup-handle").focus(); return; }
+  $("#setup-err").hidden = true;
+  $("#setup-go").disabled = true;
+
   const provider = state.net.providers[simpleHash(handle) % state.net.providers.length];
-  $("#setup-go").textContent = "generating keys…";
-  setTimeout(() => {
-    state.identity = generateIdentity(handle, provider.id);
-    localStorage.setItem(ID_KEY, JSON.stringify(serializeIdentity(state.identity)));
+  showKeygen(0, "starting");
+
+  try {
+    const id = await generateIdentityStaged(handle, provider.id, (pct, label) => showKeygen(pct, label));
+    state.identity = id;
+    try {
+      localStorage.setItem(ID_KEY, JSON.stringify(serializeIdentity(id)));
+    } catch {
+      toast("keys kept for this session only (storage unavailable)");
+    }
+    await sleep(260); // let the 100% state be seen
     $("#setup").hidden = true;
     startApp();
-  }, 30);
+  } catch (e) {
+    resetSetupForm();
+    const msg = (e && e.message) ? e.message : String(e);
+    const el = $("#setup-err");
+    el.textContent = "Key generation failed: " + msg;
+    el.hidden = false;
+    toast("key generation failed");
+    // Surface it for debugging too.
+    console.error("[noblechat] key generation failed", e);
+  }
 }
 
 function startApp() {
@@ -142,8 +235,10 @@ function pushMessage(handle, msg) {
   if (state.active === handle) renderMessages();
 }
 function saveContacts() {
-  const arr = [...state.contacts.values()].map(serializeCard);
-  localStorage.setItem(CONTACTS_KEY, JSON.stringify(arr));
+  try {
+    const arr = [...state.contacts.values()].map(serializeCard);
+    localStorage.setItem(CONTACTS_KEY, JSON.stringify(arr));
+  } catch {}
 }
 function loadContacts() {
   try {
@@ -247,4 +342,4 @@ function wireUI() {
   updateStats();
 }
 
-init();
+boot();
