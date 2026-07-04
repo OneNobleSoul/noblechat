@@ -6,6 +6,7 @@ services:
     environment:
       PORT: "8790"
       MEAN_DELAY_MS: "60"
+      NET_SEED: "noblechat-mixnet-v1-8f3ac2e17b9d4056"
     expose:
       - "8790"
     networks:

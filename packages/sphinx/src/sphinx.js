@@ -69,8 +69,16 @@ function eqBytes(a, b) {
 }
 
 // ---- node keys ------------------------------------------------------------
-export function generateNodeKey() {
-  const secret = randScalar();
+export function generateNodeKey(seed = null) {
+  // With a seed the key is deterministic (stable topology across restarts);
+  // without one it stays random, exactly as before.
+  let secret;
+  if (seed) {
+    const n = mod(bytesToNumberLE(sha512(seed)));
+    secret = n === 0n ? 1n : n;
+  } else {
+    secret = randScalar();
+  }
   const pub = RistrettoPoint.BASE.multiply(secret).toRawBytes();
   return { secret, public: pub };
 }

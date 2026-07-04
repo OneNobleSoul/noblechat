@@ -23,7 +23,7 @@ const GATE_OK = "noblechat:gate-ok";
 const state = {
   ws: null, net: null, meanDelayMs: 60,
   identity: null, contacts: new Map(), convos: new Map(),
-  active: null, coverOn: false, coverTimer: null,
+  active: null, coverOn: true, coverTimer: null,
   netCols: [], stats: { sent: 0, cover: 0, recv: 0 },
 };
 
@@ -90,13 +90,19 @@ async function init() {
   try { saved = localStorage.getItem(ID_KEY); } catch {}
   if (saved) {
     try {
-      state.identity = deserializeIdentity(JSON.parse(saved));
+      const id = deserializeIdentity(JSON.parse(saved));
+      // The identity carries a provider id from whenever it was created. If the
+      // network no longer has that provider (e.g. this identity predates a
+      // topology change), routing back to us is impossible — start fresh.
+      const provOk = state.net.providers.some((p) => toB64(p.id) === toB64(id.providerId));
+      if (!provOk) throw new Error("identity belongs to an old network");
+      state.identity = id;
       loadContacts();
       startApp();
       return;
     } catch {
-      // corrupt stored identity — fall through to a fresh setup
-      try { localStorage.removeItem(ID_KEY); } catch {}
+      // corrupt or stale stored identity — start fresh
+      try { localStorage.removeItem(ID_KEY); localStorage.removeItem(CONTACTS_KEY); } catch {}
     }
   }
   $("#setup").hidden = false;
@@ -207,7 +213,15 @@ function sendMessage() {
   try {
     const { firstNodeId, packet } = buildOutgoing(state.net, card, content);
     state.ws.send(JSON.stringify({ t: "submit", node: toB64(firstNodeId), packet: serializePacket(packet) }));
-  } catch (e) { toast("send failed: " + e.message); return; }
+  } catch (e) {
+    if (String(e.message).includes("unknown provider")) {
+      toast("contact's routing info was stale — refreshing, please resend");
+      fetchCard(state.active);
+    } else {
+      toast("send failed: " + e.message);
+    }
+    return;
+  }
   pushMessage(state.active, { dir: "out", body, ts: content.ts });
   state.stats.sent++; updateStats();
   input.value = "";
@@ -338,7 +352,10 @@ function wireUI() {
   $("#add-handle").addEventListener("keydown", (e) => { if (e.key === "Enter") { fetchCard($("#add-handle").value, { silent: false }); $("#add-handle").value = ""; } });
   $("#msg-send").addEventListener("click", sendMessage);
   $("#msg-input").addEventListener("keydown", (e) => e.key === "Enter" && sendMessage());
-  $("#cover-toggle").addEventListener("click", toggleCover);
+  const cover = $("#cover-toggle");
+  cover.addEventListener("click", toggleCover);
+  cover.textContent = "cover: " + (state.coverOn ? "on" : "off");
+  cover.classList.toggle("on", state.coverOn);
   updateStats();
 }
 

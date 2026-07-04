@@ -20,7 +20,8 @@ const PUBLIC = path.resolve(__dirname, "../web/public");
 const PORT = Number(process.env.PORT || 8790);
 const MEAN_DELAY_MS = Number(process.env.MEAN_DELAY_MS || 60);
 
-const dir = buildTestnet({ layers: 3, perLayer: 3, providers: 2 });
+const NET_SEED = process.env.NET_SEED || null;
+const dir = buildTestnet({ layers: 3, perLayer: 3, providers: 2, seed: NET_SEED });
 
 // broadcast hop events (node labels only) so the UI can visualise the flow
 const sockets = new Set();
