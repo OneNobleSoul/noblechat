@@ -36,7 +36,7 @@ const mix = new Mixnet(dir, {
 // in-memory public key directory (public cards only)
 const cards = new Map();
 
-const MIME = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml", ".json": "application/json" };
+const MIME = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml", ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png", ".ico": "image/x-icon" };
 
 function serveStatic(req, res) {
   let rel = req.url.split("?")[0];
