@@ -1,0 +1,10 @@
+{
+  "appId": "tech.noblesoul.noblechat",
+  "appName": "NobleChat",
+  "webDir": "www",
+  "backgroundColor": "#06080c",
+  "server": {
+    "url": "https://chat.noblesoul.tech",
+    "cleartext": false
+  }
+}

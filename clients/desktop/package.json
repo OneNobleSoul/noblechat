@@ -1,0 +1,25 @@
+{
+  "name": "noblechat-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NobleChat desktop client",
+  "author": "OneNobleSoul",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^32.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "tech.noblesoul.noblechat",
+    "productName": "NobleChat",
+    "directories": { "output": "dist" },
+    "files": ["main.js"],
+    "linux": { "target": ["AppImage"], "category": "Network", "icon": "build/icon.png" },
+    "mac": { "target": ["dmg"], "category": "public.app-category.business", "icon": "build/icon.png" },
+    "win": { "target": ["nsis"], "icon": "build/icon.png" }
+  }
+}

@@ -99,3 +99,41 @@ post-quantum standards (ML-KEM, ML-DSA).
 ## License
 
 AGPL-3.0 — self-host it, change it, but keep it free and open.
+
+## Clients & install
+
+NobleChat runs in any modern browser at your deployment URL, and installs as an
+app on all three platforms.
+
+### Install as an app (no store needed)
+
+- **Desktop (Chrome/Edge):** open the site, click the install icon in the
+  address bar.
+- **Android (Chrome):** menu → "Add to Home screen" / "Install app".
+- **iPhone (Safari):** Share → "Add to Home Screen". Runs full-screen with its
+  own icon; same client-side crypto as the browser.
+
+This works because NobleChat is a PWA (web app manifest + service worker).
+
+### Native builds
+
+Tagged releases build native clients in CI and attach them to the GitHub
+release:
+
+- **Desktop** (`clients/desktop`, Electron): AppImage (Linux), `.dmg` (macOS),
+  `.exe` installer (Windows). Point it at another deployment with the
+  `NOBLECHAT_URL` env var.
+- **Android** (`clients/mobile`, Capacitor): a sideloadable debug `.apk`.
+
+To cut a release: `git tag v0.1.0 && git push origin v0.1.0` — the `release`
+workflow does the rest.
+
+> **iOS note:** Apple does not allow app distribution via GitHub. A native
+> iPhone build needs an Apple Developer account, a Mac (or macOS CI), and App
+> Store review. The Capacitor iOS project is ready in `clients/mobile`; until
+> then, iPhone users install the PWA. See `docs/ENTERPRISE.md`.
+
+### Is this ready to sell as "enterprise-secure"?
+
+Not yet — and that claim specifically needs an independent security audit plus
+backend hardening. `docs/ENTERPRISE.md` is an honest gap analysis and roadmap.
