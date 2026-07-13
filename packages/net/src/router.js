@@ -13,12 +13,23 @@ function poissonDelay(meanMs) {
   return -meanMs * Math.log(1 - Math.random());
 }
 
+// Default mailbox store: in-memory queue per mailbox. The gateway swaps in a
+// durable (SQLite-backed) store so ciphertext survives restarts and reaches
+// recipients who were offline. Interface: push(key, env), drain(key) -> env[].
+function memMailboxStore() {
+  const m = new Map();
+  return {
+    push(k, env) { const a = m.get(k); if (a) a.push(env); else m.set(k, [env]); },
+    drain(k) { const a = m.get(k); if (!a || !a.length) return []; m.set(k, []); return a; },
+  };
+}
+
 export class Mixnet {
-  constructor(directory, { meanDelayMs = 40, onHop = null } = {}) {
+  constructor(directory, { meanDelayMs = 40, onHop = null, mailboxStore = null } = {}) {
     this.dir = directory;
     this.meanDelayMs = meanDelayMs;
     this.onHop = onHop;
-    this.mailboxes = new Map(); // key -> envelope[]
+    this.mailboxStore = mailboxStore || memMailboxStore();
     this.subs = new Map(); // key -> Set<cb>
     this.stats = { forwarded: 0, delivered: 0 };
   }
@@ -31,12 +42,8 @@ export class Mixnet {
     const k = this._key(providerId, mailbox);
     if (!this.subs.has(k)) this.subs.set(k, new Set());
     this.subs.get(k).add(cb);
-    // flush anything queued while offline
-    const queued = this.mailboxes.get(k);
-    if (queued && queued.length) {
-      this.mailboxes.set(k, []);
-      for (const env of queued) cb(env);
-    }
+    // flush anything queued while this mailbox was offline
+    for (const env of this.mailboxStore.drain(k)) cb(env);
     return () => this.subs.get(k)?.delete(cb);
   }
 
@@ -53,8 +60,7 @@ export class Mixnet {
     if (subs && subs.size) {
       for (const cb of subs) cb(inner.envelope);
     } else {
-      if (!this.mailboxes.has(k)) this.mailboxes.set(k, []);
-      this.mailboxes.get(k).push(inner.envelope);
+      this.mailboxStore.push(k, inner.envelope);
     }
   }
 

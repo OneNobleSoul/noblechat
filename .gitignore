@@ -6,3 +6,9 @@ dist/
 
 # generated web bundle
 apps/web/public/app.bundle.js
+
+# local runtime data (sqlite)
+data/
+*.db
+*.db-wal
+*.db-shm

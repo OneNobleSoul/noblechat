@@ -7,7 +7,7 @@
 <meta name="description" content="Private messaging over a real mix network with hybrid post-quantum encryption.">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260718d">
+<link rel="stylesheet" href="/style.css?v=20260718e">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◆</text></svg>">
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#06080c">
@@ -114,11 +114,7 @@
 </div>
 
 <div id="toast" class="toast" hidden></div>
-<script src="/app.bundle.js?v=20260718d"></script>
-<script>
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", function () { navigator.serviceWorker.register("/sw.js").catch(function(){}); });
-}
-</script>
+<script src="/app.bundle.js?v=20260718e"></script>
+<script src="/register-sw.js?v=20260718e"></script>
 </body>
 </html>

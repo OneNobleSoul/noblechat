@@ -7,11 +7,17 @@ services:
       PORT: "8790"
       MEAN_DELAY_MS: "60"
       NET_SEED: "noblechat-mixnet-v1-8f3ac2e17b9d4056"
+      DATA_DIR: "/data"
     expose:
       - "8790"
+    volumes:
+      - noblechat-data:/data
     networks:
       - jarvis20_default
 
 networks:
   jarvis20_default:
     external: true
+
+volumes:
+  noblechat-data:
