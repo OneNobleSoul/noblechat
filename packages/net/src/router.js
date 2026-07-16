@@ -14,8 +14,9 @@ function poissonDelay(meanMs) {
 }
 
 // Default mailbox store: in-memory queue per mailbox. The gateway swaps in a
-// durable (SQLite-backed) store so ciphertext survives restarts and reaches
-// recipients who were offline. Interface: push(key, env), drain(key) -> env[].
+// durable (Postgres-backed) store so ciphertext survives restarts and reaches
+// recipients who were offline. Interface: push(key, env), drain(key) -> env[]
+// (both may be sync or async — the router awaits either).
 function memMailboxStore() {
   const m = new Map();
   return {
@@ -42,8 +43,10 @@ export class Mixnet {
     const k = this._key(providerId, mailbox);
     if (!this.subs.has(k)) this.subs.set(k, new Set());
     this.subs.get(k).add(cb);
-    // flush anything queued while this mailbox was offline
-    for (const env of this.mailboxStore.drain(k)) cb(env);
+    // flush anything queued while this mailbox was offline (store may be async)
+    Promise.resolve(this.mailboxStore.drain(k))
+      .then((envs) => { for (const env of envs || []) cb(env); })
+      .catch(() => {});
     return () => this.subs.get(k)?.delete(cb);
   }
 
@@ -60,7 +63,7 @@ export class Mixnet {
     if (subs && subs.size) {
       for (const cb of subs) cb(inner.envelope);
     } else {
-      this.mailboxStore.push(k, inner.envelope);
+      Promise.resolve(this.mailboxStore.push(k, inner.envelope)).catch(() => {});
     }
   }
 

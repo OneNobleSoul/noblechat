@@ -1,23 +1,46 @@
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: noblechat-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - noblechat-db:/var/lib/postgresql/data
+    networks:
+      - noblechat_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
   noblechat:
     build: .
     container_name: noblechat
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     environment:
       PORT: "8790"
       MEAN_DELAY_MS: "60"
-      NET_SEED: "noblechat-mixnet-v1-8f3ac2e17b9d4056"
-      DATA_DIR: "/data"
+      NET_SEED: ${NET_SEED}
+      DATABASE_URL: ${DATABASE_URL}
+      ADMIN_TOKEN: ${ADMIN_TOKEN}
     expose:
       - "8790"
-    volumes:
-      - noblechat-data:/data
     networks:
       - jarvis20_default
+      - noblechat_internal
 
 networks:
   jarvis20_default:
     external: true
+  noblechat_internal:
+    driver: bridge
 
 volumes:
-  noblechat-data:
+  noblechat-db:

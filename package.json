@@ -9,7 +9,7 @@
     "start": "node apps/server/server.js",
     "build:web": "node scripts/build-web.js",
     "smoke": "node scripts/smoke.js",
-    "test": "node --disable-warning=ExperimentalWarning --test packages/crypto/test.js packages/sphinx/test.js packages/net/test.js tests/store.test.js"
+    "test": "node --test packages/crypto/test.js packages/sphinx/test.js packages/net/test.js tests/gateway.test.js"
   },
   "license": "AGPL-3.0",
   "dependencies": {
@@ -17,7 +17,8 @@
     "@noble/curves": "^1.9.1",
     "@noble/hashes": "^1.8.0",
     "@noble/post-quantum": "^0.4.1",
-    "ws": "^8.21.1"
+    "ws": "^8.21.1",
+    "pg": "^8.13.1"
   },
   "devDependencies": {
     "esbuild": "^0.28.1"
