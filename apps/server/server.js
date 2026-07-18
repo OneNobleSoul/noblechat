@@ -34,6 +34,11 @@ const CFG = {
   maxConnPerIp: Number(process.env.MAX_CONN_PER_IP || 20),
   mailboxTtlMs: Number(process.env.MAILBOX_TTL_MS || 7 * 24 * 3600 * 1000),
   maxPerMailbox: Number(process.env.MAX_PER_MAILBOX || 1000),
+  mixPort: Number(process.env.MIX_PORT || 8890),
+  layers: Number(process.env.LAYERS || 3),
+  perLayer: Number(process.env.PER_LAYER || 2),
+  providers: Number(process.env.PROVIDERS || 2),
+  internalToken: process.env.INTERNAL_TOKEN || "",
 };
 
 function computeVersion() {
@@ -104,11 +109,18 @@ async function main() {
     push: (k, env) => store.pushEnvelope(k, toB64(env)),
     drain: (k) => store.drainEnvelopes(k).then((list) => list.map(fromB64)),
   };
-  const dir = buildTestnet({ layers: 3, perLayer: 3, providers: 2, seed: CFG.netSeed });
+  const dir = buildTestnet({ layers: CFG.layers, perLayer: CFG.perLayer, providers: CFG.providers, seed: CFG.netSeed, mixPort: CFG.mixPort });
   const sockets = new Set();
   const mbkeySockets = new Map();
   const bannedMbkeys = new Set();
-  const mix = new Mixnet(dir, { meanDelayMs: CFG.meanDelayMs, mailboxStore, onHop: (label) => broadcast({ t: "hop", label }) });
+  // The mix RELAY runs in separate node processes now; this Mixnet instance is
+  // used only for mailbox bookkeeping (subscriptions + durable queue). Providers
+  // hand final deliveries back to us over /internal/deliver.
+  const mix = new Mixnet(dir, { meanDelayMs: CFG.meanDelayMs, mailboxStore });
+  async function forwardToNode(url, packetObj) {
+    try { await fetch(url, { method: "POST", headers: { "content-type": "application/json", "x-internal": CFG.internalToken }, body: JSON.stringify({ packet: packetObj }) }); } catch { /* drop */ }
+  }
+  const internalOk = (req) => CFG.internalToken && req.headers["x-internal"] === CFG.internalToken;
 
   const live = { maintenance: (await store.getSetting("maintenance", "off")) === "on", maintenanceMsg: (await store.getSetting("maintenance_msg", "")) || "", announcement: (await store.getSetting("announcement", "")) || "" };
   for (const k of await store.allBannedMbkeys()) bannedMbkeys.add(k);
@@ -147,6 +159,18 @@ async function main() {
     try {
       if (url.pathname === "/healthz") { res.writeHead(200).end("ok"); return; }
       if (url.pathname === "/readyz") { try { await store.stats(); res.writeHead(200).end("ready"); } catch { res.writeHead(503).end("not ready"); } return; }
+
+      // ---- internal (mix nodes only; gated by a shared secret) ----
+      if (url.pathname === "/internal/deliver" && req.method === "POST") {
+        if (!internalOk(req)) { res.writeHead(401).end(); return; }
+        try { const b = JSON.parse(await readBody(req, CFG.maxWsMsgBytes)); mix._deliver(fromB64(b.providerId), fromB64(b.payload)); } catch { /* */ }
+        res.writeHead(202).end(); return;
+      }
+      if (url.pathname === "/internal/hop" && req.method === "POST") {
+        if (!internalOk(req)) { res.writeHead(401).end(); return; }
+        try { const b = JSON.parse(await readBody(req, 4096)); if (b.label) broadcast({ t: "hop", label: String(b.label).slice(0, 40) }); } catch { /* */ }
+        res.writeHead(202).end(); return;
+      }
       if (url.pathname === "/api/net") { if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" }); return json(res, 200, { view: dir.publicView(), meanDelayMs: CFG.meanDelayMs }); }
       if (url.pathname === "/api/status") { if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" }); return json(res, 200, statusObj()); }
 
@@ -265,8 +289,9 @@ async function main() {
         if (live.maintenance) return;
         if (!submitLimit(ws)) return;
         if (!isB64(m.node)) return;
-        let pkt; try { pkt = deserializePacket(m.packet); } catch { return; }
-        try { mix.inject(fromB64(m.node), pkt); } catch { /* */ }
+        try { deserializePacket(m.packet); } catch { return; } // validate shape only
+        const url = dir.urlOf(fromB64(m.node));                // forward to the entry mix node
+        if (url) forwardToNode(url, m.packet);
         return;
       }
       if (m.t === "subscribe") {

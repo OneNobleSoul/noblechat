@@ -19,6 +19,7 @@ services:
 
   noblechat:
     build: .
+    image: noblechat:local
     container_name: noblechat
     restart: unless-stopped
     depends_on:
@@ -30,11 +31,200 @@ services:
       NET_SEED: ${NET_SEED}
       DATABASE_URL: ${DATABASE_URL}
       ADMIN_TOKEN: ${ADMIN_TOKEN}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+      LAYERS: "3"
+      PER_LAYER: "2"
+      PROVIDERS: "2"
+      MIX_PORT: "8890"
     expose:
       - "8790"
     networks:
       - jarvis20_default
       - noblechat_internal
+
+  mix-l0-0:
+    image: noblechat:local
+    container_name: nc-mix-l0-0
+    command: ["node", "apps/node/node.js"]
+    restart: unless-stopped
+    environment:
+      NODE_LABEL: "mix-L0-0"
+      NET_SEED: ${NET_SEED}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+      GATEWAY_URL: "http://noblechat:8790"
+      MEAN_DELAY_MS: "60"
+      LAYERS: "3"
+      PER_LAYER: "2"
+      PROVIDERS: "2"
+      PORT: "8890"
+    networks:
+      - noblechat_internal
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8890/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  mix-l0-1:
+    image: noblechat:local
+    container_name: nc-mix-l0-1
+    command: ["node", "apps/node/node.js"]
+    restart: unless-stopped
+    environment:
+      NODE_LABEL: "mix-L0-1"
+      NET_SEED: ${NET_SEED}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+      GATEWAY_URL: "http://noblechat:8790"
+      MEAN_DELAY_MS: "60"
+      LAYERS: "3"
+      PER_LAYER: "2"
+      PROVIDERS: "2"
+      PORT: "8890"
+    networks:
+      - noblechat_internal
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8890/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  mix-l1-0:
+    image: noblechat:local
+    container_name: nc-mix-l1-0
+    command: ["node", "apps/node/node.js"]
+    restart: unless-stopped
+    environment:
+      NODE_LABEL: "mix-L1-0"
+      NET_SEED: ${NET_SEED}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+      GATEWAY_URL: "http://noblechat:8790"
+      MEAN_DELAY_MS: "60"
+      LAYERS: "3"
+      PER_LAYER: "2"
+      PROVIDERS: "2"
+      PORT: "8890"
+    networks:
+      - noblechat_internal
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8890/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  mix-l1-1:
+    image: noblechat:local
+    container_name: nc-mix-l1-1
+    command: ["node", "apps/node/node.js"]
+    restart: unless-stopped
+    environment:
+      NODE_LABEL: "mix-L1-1"
+      NET_SEED: ${NET_SEED}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+      GATEWAY_URL: "http://noblechat:8790"
+      MEAN_DELAY_MS: "60"
+      LAYERS: "3"
+      PER_LAYER: "2"
+      PROVIDERS: "2"
+      PORT: "8890"
+    networks:
+      - noblechat_internal
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8890/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  mix-l2-0:
+    image: noblechat:local
+    container_name: nc-mix-l2-0
+    command: ["node", "apps/node/node.js"]
+    restart: unless-stopped
+    environment:
+      NODE_LABEL: "mix-L2-0"
+      NET_SEED: ${NET_SEED}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+      GATEWAY_URL: "http://noblechat:8790"
+      MEAN_DELAY_MS: "60"
+      LAYERS: "3"
+      PER_LAYER: "2"
+      PROVIDERS: "2"
+      PORT: "8890"
+    networks:
+      - noblechat_internal
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8890/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  mix-l2-1:
+    image: noblechat:local
+    container_name: nc-mix-l2-1
+    command: ["node", "apps/node/node.js"]
+    restart: unless-stopped
+    environment:
+      NODE_LABEL: "mix-L2-1"
+      NET_SEED: ${NET_SEED}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+      GATEWAY_URL: "http://noblechat:8790"
+      MEAN_DELAY_MS: "60"
+      LAYERS: "3"
+      PER_LAYER: "2"
+      PROVIDERS: "2"
+      PORT: "8890"
+    networks:
+      - noblechat_internal
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8890/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  provider-0:
+    image: noblechat:local
+    container_name: nc-provider-0
+    command: ["node", "apps/node/node.js"]
+    restart: unless-stopped
+    environment:
+      NODE_LABEL: "provider-0"
+      NET_SEED: ${NET_SEED}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+      GATEWAY_URL: "http://noblechat:8790"
+      MEAN_DELAY_MS: "60"
+      LAYERS: "3"
+      PER_LAYER: "2"
+      PROVIDERS: "2"
+      PORT: "8890"
+    networks:
+      - noblechat_internal
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8890/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  provider-1:
+    image: noblechat:local
+    container_name: nc-provider-1
+    command: ["node", "apps/node/node.js"]
+    restart: unless-stopped
+    environment:
+      NODE_LABEL: "provider-1"
+      NET_SEED: ${NET_SEED}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+      GATEWAY_URL: "http://noblechat:8790"
+      MEAN_DELAY_MS: "60"
+      LAYERS: "3"
+      PER_LAYER: "2"
+      PROVIDERS: "2"
+      PORT: "8890"
+    networks:
+      - noblechat_internal
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8890/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
 
 networks:
   jarvis20_default:
