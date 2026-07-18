@@ -12,6 +12,11 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # The crypto core is audited and security critical. Take only patch level
+      # updates automatically; minor and major bumps are reviewed by hand.
+      # (For 0.x packages a "minor" bump can still be a breaking change.)
+      - dependency-name: "@noble/*"
+        update-types: ["version-update:semver-minor"]
 
   - package-ecosystem: npm
     directory: "/clients/desktop"
