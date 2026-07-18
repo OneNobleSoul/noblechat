@@ -17,6 +17,8 @@ import { Mixnet } from "../../packages/net/src/router.js";
 import { deserializePacket } from "../../packages/net/src/serialize.js";
 import { fromB64, toB64 } from "../../packages/crypto/src/util.js";
 import { openStore } from "./store.js";
+import { createLog } from "./log.js";
+import { isTransport, probeTcp } from "./transport.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.resolve(__dirname, "../web/public");
@@ -39,6 +41,7 @@ const CFG = {
   perLayer: Number(process.env.PER_LAYER || 2),
   providers: Number(process.env.PROVIDERS || 2),
   internalToken: process.env.INTERNAL_TOKEN || "",
+  nymClientUrl: process.env.NYM_CLIENT_URL || "", // e.g. ws://nym-client:1977 once the sidecar exists
 };
 
 function computeVersion() {
@@ -122,11 +125,24 @@ async function main() {
   }
   const internalOk = (req) => CFG.internalToken && req.headers["x-internal"] === CFG.internalToken;
 
-  const live = { maintenance: (await store.getSetting("maintenance", "off")) === "on", maintenanceMsg: (await store.getSetting("maintenance_msg", "")) || "", announcement: (await store.getSetting("announcement", "")) || "" };
+  const live = { maintenance: (await store.getSetting("maintenance", "off")) === "on", maintenanceMsg: (await store.getSetting("maintenance_msg", "")) || "", announcement: (await store.getSetting("announcement", "")) || "", transport: (await store.getSetting("transport", "internal")) || "internal" };
+  if (!isTransport(live.transport)) live.transport = "internal";
   for (const k of await store.allBannedMbkeys()) bannedMbkeys.add(k);
 
+  // Ops state for the admin panel: an in-memory event log plus a few counters.
+  const elog = createLog();
+  const startedAt = Date.now();
+  const counters = { submitted: 0, delivered: 0, registered: 0, logins: 0 };
+  // If a previous run enabled nym and the sidecar is gone, fall back rather
+  // than silently dropping every submit.
+  if (live.transport === "nym" && !(CFG.nymClientUrl && (await probeTcp(CFG.nymClientUrl)))) {
+    live.transport = "internal";
+    await store.setSetting("transport", "internal");
+    elog.add("warn", "transport fallback", "nym sidecar unreachable at boot, using internal mixnet");
+  }
+
   function broadcast(obj) { const s = JSON.stringify(obj); for (const ws of sockets) if (ws.readyState === 1) ws.send(s); }
-  function statusObj() { return { version: APP_VERSION, announcement: live.announcement, maintenance: live.maintenance, maintenanceMsg: live.maintenanceMsg }; }
+  function statusObj() { return { version: APP_VERSION, announcement: live.announcement, maintenance: live.maintenance, maintenanceMsg: live.maintenanceMsg, transport: live.transport }; }
   function broadcastStatus() { broadcast({ t: "status", ...statusObj() }); }
   async function refreshBans() { bannedMbkeys.clear(); for (const k of await store.allBannedMbkeys()) bannedMbkeys.add(k); }
 
@@ -163,7 +179,7 @@ async function main() {
       // ---- internal (mix nodes only; gated by a shared secret) ----
       if (url.pathname === "/internal/deliver" && req.method === "POST") {
         if (!internalOk(req)) { res.writeHead(401).end(); return; }
-        try { const b = JSON.parse(await readBody(req, CFG.maxWsMsgBytes)); mix._deliver(fromB64(b.providerId), fromB64(b.payload)); } catch { /* */ }
+        try { const b = JSON.parse(await readBody(req, CFG.maxWsMsgBytes)); mix._deliver(fromB64(b.providerId), fromB64(b.payload)); counters.delivered++; } catch { /* */ }
         res.writeHead(202).end(); return;
       }
       if (url.pathname === "/internal/hop" && req.method === "POST") {
@@ -184,6 +200,8 @@ async function main() {
           if (typeof b.password !== "string" || b.password.length < 8) return json(res, 400, { error: "password too short (min 8)" });
           if (await store.getAccount(username)) return json(res, 409, { error: "handle already taken" });
           await store.createAccount(username, hashPassword(b.password));
+          counters.registered++;
+          elog.add("info", "account registered", username);
           const token = crypto.randomBytes(32).toString("hex");
           await store.createSession(token, username, CFG.sessionTtlMs);
           return json(res, 200, { token, username });
@@ -197,6 +215,7 @@ async function main() {
           const acc = await store.getAccount(username);
           if (!acc || !verifyPassword(String(b.password || ""), acc.pass)) return json(res, 401, { error: "wrong handle or password" });
           if (acc.banned) return json(res, 403, { error: "account suspended" });
+          counters.logins++;
           const token = crypto.randomBytes(32).toString("hex");
           await store.createSession(token, username, CFG.sessionTtlMs);
           return json(res, 200, { token, username });
@@ -251,19 +270,59 @@ async function main() {
         if (!requireAdmin(req, res)) return;
         if (url.pathname === "/api/admin/status" && req.method === "GET") {
           const s = await store.stats();
-          return json(res, 200, { ...statusObj(), users: Number(s.accounts), devices: Number(s.devices), queued: Number(s.queued), banned: Number(s.banned) });
+          return json(res, 200, {
+            ...statusObj(),
+            users: Number(s.accounts), devices: Number(s.devices), queued: Number(s.queued), banned: Number(s.banned),
+            uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
+            memRssMb: Math.round(process.memoryUsage().rss / (1024 * 1024)),
+            connections: sockets.size,
+            counters: { ...counters },
+            nymConfigured: !!CFG.nymClientUrl,
+          });
         }
         if (url.pathname === "/api/admin/users" && req.method === "GET") {
           return json(res, 200, { users: await store.listAccounts(500) });
         }
+        if (url.pathname === "/api/admin/logs" && req.method === "GET") {
+          const since = Number(url.searchParams.get("since") || 0) || 0;
+          return json(res, 200, { logs: elog.list(since) });
+        }
+        if (url.pathname === "/api/admin/mixnodes" && req.method === "GET") {
+          const nodes = [...dir.layers.flat(), ...dir.providers];
+          const checks = await Promise.all(nodes.map(async (n) => {
+            const base = n.url.replace(/\/mix$/, "");
+            try {
+              const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 1500);
+              const r = await fetch(base + "/healthz", { signal: ac.signal });
+              clearTimeout(t);
+              return { label: n.label, ok: r.ok };
+            } catch { return { label: n.label, ok: false }; }
+          }));
+          return json(res, 200, { nodes: checks });
+        }
         if (req.method === "POST") {
           const body = JSON.parse((await readBody(req, CFG.maxBodyBytes)) || "{}");
           const handle = String(body.handle || body.username || "").toLowerCase();
-          if (url.pathname === "/api/admin/announce") { live.announcement = String(body.text || "").slice(0, 500); await store.setSetting("announcement", live.announcement); broadcastStatus(); return json(res, 200, { ok: true }); }
-          if (url.pathname === "/api/admin/maintenance") { live.maintenance = !!body.on; live.maintenanceMsg = String(body.message || "").slice(0, 500); await store.setSetting("maintenance", live.maintenance ? "on" : "off"); await store.setSetting("maintenance_msg", live.maintenanceMsg); broadcastStatus(); return json(res, 200, { ok: true, maintenance: live.maintenance }); }
-          if (url.pathname === "/api/admin/ban") { if (!HANDLE_RE.test(handle)) return json(res, 400, { error: "bad handle" }); const mbk = await store.banAccount(handle, String(body.reason || "").slice(0, 200)); await refreshBans(); for (const k of mbk) { const set = mbkeySockets.get(k); if (set) for (const ws of set) { try { ws.close(4003, "banned"); } catch { /* */ } } } return json(res, 200, { ok: true }); }
-          if (url.pathname === "/api/admin/unban") { await store.unbanAccount(handle); await refreshBans(); return json(res, 200, { ok: true }); }
-          if (url.pathname === "/api/admin/delete") { const mbk = await store.deleteAccount(handle); await refreshBans(); for (const k of mbk) { const set = mbkeySockets.get(k); if (set) for (const ws of set) { try { ws.close(4004, "removed"); } catch { /* */ } } } return json(res, 200, { ok: true }); }
+          if (url.pathname === "/api/admin/announce") { live.announcement = String(body.text || "").slice(0, 500); await store.setSetting("announcement", live.announcement); elog.add("info", live.announcement ? "announcement published" : "announcement cleared"); broadcastStatus(); return json(res, 200, { ok: true }); }
+          if (url.pathname === "/api/admin/maintenance") { live.maintenance = !!body.on; live.maintenanceMsg = String(body.message || "").slice(0, 500); await store.setSetting("maintenance", live.maintenance ? "on" : "off"); await store.setSetting("maintenance_msg", live.maintenanceMsg); elog.add("warn", "maintenance " + (live.maintenance ? "enabled" : "disabled")); broadcastStatus(); return json(res, 200, { ok: true, maintenance: live.maintenance }); }
+          if (url.pathname === "/api/admin/transport") {
+            const mode = String(body.mode || "");
+            if (!isTransport(mode)) return json(res, 400, { error: "unknown transport" });
+            if (mode === "nym") {
+              if (!CFG.nymClientUrl) return json(res, 409, { error: "nym sidecar not configured (NYM_CLIENT_URL)" });
+              if (!(await probeTcp(CFG.nymClientUrl))) return json(res, 409, { error: "nym sidecar not reachable" });
+            }
+            if (mode !== live.transport) {
+              live.transport = mode;
+              await store.setSetting("transport", mode);
+              elog.add("warn", "transport switched", mode);
+              broadcastStatus();
+            }
+            return json(res, 200, { ok: true, transport: live.transport });
+          }
+          if (url.pathname === "/api/admin/ban") { if (!HANDLE_RE.test(handle)) return json(res, 400, { error: "bad handle" }); const mbk = await store.banAccount(handle, String(body.reason || "").slice(0, 200)); await refreshBans(); elog.add("warn", "account banned", handle); for (const k of mbk) { const set = mbkeySockets.get(k); if (set) for (const ws of set) { try { ws.close(4003, "banned"); } catch { /* */ } } } return json(res, 200, { ok: true }); }
+          if (url.pathname === "/api/admin/unban") { await store.unbanAccount(handle); await refreshBans(); elog.add("info", "account unbanned", handle); return json(res, 200, { ok: true }); }
+          if (url.pathname === "/api/admin/delete") { const mbk = await store.deleteAccount(handle); await refreshBans(); elog.add("warn", "account deleted", handle); for (const k of mbk) { const set = mbkeySockets.get(k); if (set) for (const ws of set) { try { ws.close(4004, "removed"); } catch { /* */ } } } return json(res, 200, { ok: true }); }
         }
         return json(res, 404, { error: "not found" });
       }
@@ -291,7 +350,7 @@ async function main() {
         if (!isB64(m.node)) return;
         try { deserializePacket(m.packet); } catch { return; } // validate shape only
         const url = dir.urlOf(fromB64(m.node));                // forward to the entry mix node
-        if (url) forwardToNode(url, m.packet);
+        if (url) { counters.submitted++; forwardToNode(url, m.packet); }
         return;
       }
       if (m.t === "subscribe") {
@@ -330,7 +389,8 @@ async function main() {
   process.on("uncaughtException", (e) => console.error("uncaughtException", e));
   process.on("unhandledRejection", (e) => console.error("unhandledRejection", e));
 
-  server.listen(CFG.port, () => console.log(`NobleChat gateway on :${CFG.port}  (v${APP_VERSION}, mix ~${CFG.meanDelayMs}ms/hop, maintenance=${live.maintenance})`));
+  elog.add("info", "gateway started", `v${APP_VERSION}, transport=${live.transport}`);
+  server.listen(CFG.port, () => console.log(`NobleChat gateway on :${CFG.port}  (v${APP_VERSION}, mix ~${CFG.meanDelayMs}ms/hop, transport=${live.transport}, maintenance=${live.maintenance})`));
 }
 
 main().catch((e) => { console.error("fatal:", e); process.exit(1); });

@@ -2,7 +2,7 @@
 // locally. Accounts add authenticated handle ownership + multi-device fan-out
 // without ever handing the server a private key or a plaintext password.
 import {
-  generateIdentityStaged, buildOutgoing, openIncoming, buildCoverLoop,
+  generateIdentityStaged, buildOutgoing, openIncoming,
 } from "../../../packages/net/src/client.js";
 import {
   makeBrowserNet, serializePacket, serializeCard, deserializeCard,
@@ -21,6 +21,7 @@ const state = {
   myBundle: [], contacts: new Map(), convos: new Map(), active: null,
   coverOn: true, coverTimer: null, netCols: [], stats: { sent: 0, cover: 0, recv: 0 },
   seen: new Set(), version: null, maintenance: false, statusTimer: null, authMode: "login",
+  transport: "internal",
 };
 
 const ls = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* */ } }, del: (k) => { try { localStorage.removeItem(k); } catch { /* */ } } };
@@ -258,9 +259,25 @@ function onDeliver(envelope) {
   }
 }
 
+// ---------- transport dispatch ----------
+// The server announces which transport is active: "internal" is our own mix
+// network, "nym" the public Nym mixnet. All sends go through this dispatch so
+// the nym client integration only has to add an entry here. Until that lands
+// we keep routing over the internal path even if the server flips the switch,
+// so an early flip cannot strand messages from clients like this one.
+const transports = {
+  internal: {
+    submit(card, content) {
+      const { firstNodeId, packet } = buildOutgoing(state.net, card, content);
+      state.ws.send(JSON.stringify({ t: "submit", node: toB64(firstNodeId), packet: serializePacket(packet) }));
+    },
+  },
+};
+function activeTransport() { return transports[state.transport] || transports.internal; }
+
 // ---------- messaging ----------
 function sendToCard(card, content) {
-  try { const { firstNodeId, packet } = buildOutgoing(state.net, card, content); state.ws.send(JSON.stringify({ t: "submit", node: toB64(firstNodeId), packet: serializePacket(packet) })); return true; }
+  try { activeTransport().submit(card, content); return true; }
   catch (e) { if (String(e.message).includes("unknown provider")) fetchBundle(state.active, { silent: true }); return false; }
 }
 async function sendMessage() {
@@ -316,7 +333,7 @@ function toggleCover() {
   if (state.coverOn) { toast("cover traffic on - hiding when you talk"); scheduleCover(); } else clearTimeout(state.coverTimer);
 }
 function scheduleCover() { clearTimeout(state.coverTimer); state.coverTimer = setTimeout(() => { sendCover(); if (state.coverOn) scheduleCover(); }, poisson(3500) + 800); }
-function sendCover() { if (!state.ws || state.ws.readyState !== 1) return; try { const { firstNodeId, packet } = buildCoverLoop(state.net, state.identity); state.ws.send(JSON.stringify({ t: "submit", node: toB64(firstNodeId), packet: serializePacket(packet) })); state.stats.cover++; updateStats(); } catch { /* */ } }
+function sendCover() { if (!state.ws || state.ws.readyState !== 1) return; try { activeTransport().submit(state.identity.card, { t: "cover", ts: 0 }); state.stats.cover++; updateStats(); } catch { /* */ } }
 
 // ---------- mix viz ----------
 function buildNetViz() {
@@ -346,6 +363,7 @@ async function logout() {
 function ensureEl(id, cls, parent) { let el = document.getElementById(id); if (!el) { el = document.createElement("div"); el.id = id; el.className = cls; (parent || document.body).appendChild(el); } return el; }
 async function pollStatus() { try { const r = await fetch("/api/status"); if (r.ok) applyStatus(await r.json()); } catch { /* */ } }
 function applyStatus(s) {
+  if (s.transport && s.transport !== state.transport) state.transport = s.transport;
   if (s.version) { if (state.version && s.version !== state.version) offerUpdate(); else if (!state.version) state.version = s.version; }
   const ann = String(s.announcement || "").trim(); const banner = ensureEl("nc-announce", "nc-announce");
   if (ann) { banner.textContent = "\u{1F4E2}  " + ann; banner.hidden = false; } else banner.hidden = true;

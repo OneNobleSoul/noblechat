@@ -35,6 +35,12 @@ th{color:var(--dim);font-family:var(--mono);font-size:11px;text-transform:upperc
 .pill.on{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,var(--line))}
 .pill.off{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 40%,var(--line))}
 .err{color:var(--danger);font-size:13px;font-family:var(--mono)}
+.lvl{font-family:var(--mono);font-size:11px;text-transform:uppercase}
+.lvl-info{color:var(--muted)}.lvl-warn{color:var(--warn)}.lvl-error{color:var(--danger)}
+.pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 40%,var(--line))}
+.pill.bad{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 45%,var(--line))}
+.btn.active{outline:2px solid var(--accent);outline-offset:1px}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
 .muted{color:var(--dim);font-size:12px}
 #login{max-width:400px;margin:12vh auto 0}
 .hidden{display:none}
@@ -65,7 +71,42 @@ th{color:var(--dim);font-family:var(--mono);font-size:11px;text-transform:upperc
         <div class="stat"><b id="s-queued">0</b><span>queued msgs</span></div>
         <div class="stat"><b id="s-banned">0</b><span>banned</span></div>
         <div class="stat"><b id="s-maint">-</b><span>maintenance</span></div>
+        <div class="stat"><b id="s-uptime">-</b><span>uptime</span></div>
+        <div class="stat"><b id="s-mem">-</b><span>memory</span></div>
+        <div class="stat"><b id="s-conns">0</b><span>connections</span></div>
+        <div class="stat"><b id="s-submitted">0</b><span>packets in</span></div>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>Transport</h2>
+      <div class="row" style="margin-bottom:12px">
+        <span>Active:</span> <span id="tr-pill" class="pill">-</span>
+        <span id="tr-nym-state" class="muted"></span>
+      </div>
+      <div class="row">
+        <button id="tr-internal" class="btn ghost">Internal mixnet</button>
+        <button id="tr-nym" class="btn ghost">Nym mixnet</button>
+      </div>
+      <p class="muted" style="margin-bottom:0">Internal runs our own node fleet. Nym routes through the public Nym network and needs the nym-client sidecar up before it can be enabled.</p>
+      <p id="tr-err" class="err hidden"></p>
+    </div>
+
+    <div class="card">
+      <h2>Mix nodes</h2>
+      <div class="row" style="margin-bottom:10px"><button id="nodes-check" class="btn ghost">Check health</button></div>
+      <table><thead><tr><th>Node</th><th>Status</th></tr></thead><tbody id="nodes"></tbody></table>
+      <p id="nodes-empty" class="muted">Not checked yet.</p>
+    </div>
+
+    <div class="card">
+      <h2>Server log</h2>
+      <div class="row" style="margin-bottom:10px">
+        <button id="log-refresh" class="btn ghost">Refresh</button>
+        <label class="row" style="margin:0;gap:6px;color:var(--muted);font-size:12px"><input type="checkbox" id="log-auto" checked style="width:auto;margin:0">auto-refresh</label>
+      </div>
+      <table><thead><tr><th>Time</th><th>Level</th><th>Event</th><th>Detail</th></tr></thead><tbody id="log"></tbody></table>
+      <p id="log-empty" class="muted">Nothing logged yet.</p>
     </div>
 
     <div class="card">

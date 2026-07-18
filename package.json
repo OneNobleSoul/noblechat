@@ -9,7 +9,7 @@
     "start": "node apps/server/server.js",
     "build:web": "node scripts/build-web.js",
     "smoke": "node scripts/smoke.js",
-    "test": "node --test packages/crypto/test.js packages/sphinx/test.js packages/net/test.js tests/gateway.test.js"
+    "test": "node --test packages/crypto/test.js packages/sphinx/test.js packages/net/test.js tests/gateway.test.js tests/admin.test.js"
   },
   "license": "AGPL-3.0",
   "dependencies": {
