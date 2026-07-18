@@ -23,6 +23,12 @@ async function signIn(t) {
 }
 function signOut() { sessionStorage.removeItem(TOKEN_KEY); token = ""; showDash(false); }
 
+function fmtUptime(sec) {
+  sec = Number(sec) || 0;
+  if (sec < 3600) return Math.floor(sec / 60) + "m";
+  if (sec < 86400) return Math.floor(sec / 3600) + "h " + Math.floor((sec % 3600) / 60) + "m";
+  return Math.floor(sec / 86400) + "d " + Math.floor((sec % 86400) / 3600) + "h";
+}
 function renderStatus(s) {
   $("#ver").textContent = "version " + (s.version || "-");
   $("#s-users").textContent = s.users ?? 0;
@@ -30,11 +36,64 @@ function renderStatus(s) {
   $("#s-banned").textContent = s.banned ?? 0;
   $("#s-maint").textContent = s.maintenance ? "ON" : "off";
   $("#s-maint").style.color = s.maintenance ? "var(--warn)" : "var(--ok)";
+  $("#s-uptime").textContent = fmtUptime(s.uptimeSec);
+  $("#s-mem").textContent = (s.memRssMb ?? "-") + " MB";
+  $("#s-conns").textContent = s.connections ?? 0;
+  $("#s-submitted").textContent = (s.counters && s.counters.submitted) ?? 0;
   const pill = $("#maint-pill"); pill.textContent = s.maintenance ? "enabled" : "disabled"; pill.className = "pill " + (s.maintenance ? "on" : "off");
+  renderTransport(s);
   if (document.activeElement !== $("#ann")) $("#ann").value = s.announcement || "";
   if (document.activeElement !== $("#maint-msg")) $("#maint-msg").value = s.maintenanceMsg || "";
 }
-async function refresh() { renderStatus(await api("/api/admin/status")); await loadUsers(); }
+function renderTransport(s) {
+  const mode = s.transport || "internal";
+  const pill = $("#tr-pill");
+  pill.textContent = mode === "nym" ? "nym mixnet" : "internal mixnet";
+  pill.className = "pill " + (mode === "nym" ? "on" : "ok");
+  $("#tr-internal").classList.toggle("active", mode === "internal");
+  $("#tr-nym").classList.toggle("active", mode === "nym");
+  const nymOk = !!s.nymConfigured;
+  $("#tr-nym").disabled = !nymOk && mode !== "nym";
+  $("#tr-nym-state").textContent = nymOk ? "" : "(sidecar not configured)";
+}
+async function setTransport(mode) {
+  const err = $("#tr-err"); err.classList.add("hidden");
+  const r = await api("/api/admin/transport", "POST", { mode });
+  if (r && r.error) { err.textContent = r.error; err.classList.remove("hidden"); }
+  await refresh();
+}
+
+// ---- server log (incremental polling) ----
+let logSeq = 0;
+async function loadLogs() {
+  const d = await api("/api/admin/logs?since=" + logSeq);
+  const logs = (d && d.logs) || [];
+  if (!logs.length) return;
+  const tb = $("#log");
+  $("#log-empty").classList.add("hidden");
+  for (const e of logs) {
+    logSeq = Math.max(logSeq, e.seq);
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td class="muted">${fmtTime(e.ts)}</td><td><span class="lvl lvl-${esc(e.level)}">${esc(e.level)}</span></td><td>${esc(e.event)}</td><td class="muted">${esc(e.detail || "")}</td>`;
+    tb.insertBefore(tr, tb.firstChild); // newest on top
+  }
+  while (tb.children.length > 200) tb.removeChild(tb.lastChild);
+}
+
+async function checkNodes() {
+  $("#nodes-empty").textContent = "Checking…";
+  const d = await api("/api/admin/mixnodes");
+  const nodes = (d && d.nodes) || [];
+  const tb = $("#nodes"); tb.innerHTML = "";
+  $("#nodes-empty").classList.toggle("hidden", nodes.length > 0);
+  for (const n of nodes) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${esc(n.label)}</td><td><span class="pill ${n.ok ? "ok" : "bad"}">${n.ok ? "healthy" : "unreachable"}</span></td>`;
+    tb.appendChild(tr);
+  }
+}
+
+async function refresh() { renderStatus(await api("/api/admin/status")); await loadUsers(); await loadLogs(); }
 
 async function loadUsers() {
   const d = await api("/api/admin/users");
@@ -79,5 +138,18 @@ $("#ann-save").addEventListener("click", async () => { await api("/api/admin/ann
 $("#ann-clear").addEventListener("click", async () => { $("#ann").value = ""; await api("/api/admin/announce", "POST", { text: "" }); await refresh(); });
 $("#maint-on").addEventListener("click", async () => { await api("/api/admin/maintenance", "POST", { on: true, message: $("#maint-msg").value }); await refresh(); });
 $("#maint-off").addEventListener("click", async () => { await api("/api/admin/maintenance", "POST", { on: false, message: $("#maint-msg").value }); await refresh(); });
+$("#tr-internal").addEventListener("click", () => setTransport("internal"));
+$("#tr-nym").addEventListener("click", () => setTransport("nym"));
+$("#log-refresh").addEventListener("click", loadLogs);
+$("#nodes-check").addEventListener("click", checkNodes);
+
+// Light auto-refresh so stats and the log stay current while the tab is open.
+setInterval(async () => {
+  if (!token || $("#dash").classList.contains("hidden") || document.hidden) return;
+  try {
+    renderStatus(await api("/api/admin/status"));
+    if ($("#log-auto").checked) await loadLogs();
+  } catch { /* transient network hiccup; next tick retries */ }
+}, 15000);
 
 if (token) signIn(token); else showDash(false);
