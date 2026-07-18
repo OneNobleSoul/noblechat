@@ -151,3 +151,10 @@ input{font-family:var(--sans)}
 .nc-maint-box{max-width:440px;text-align:center;background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:34px}
 .nc-maint-title{font-family:var(--mono);font-size:22px;color:var(--warn);margin-bottom:10px}
 .nc-maint-msg{color:var(--muted);font-size:14px;line-height:1.6}
+
+/* ---- auth tabs (sign in / create account) ---- */
+.auth-tabs{display:flex;gap:6px;background:#080b11;border:1px solid var(--line);border-radius:11px;padding:4px;margin-bottom:18px}
+.auth-tab{flex:1;background:transparent;border:0;color:var(--muted);font-family:var(--sans);font-size:13.5px;font-weight:600;padding:9px;border-radius:8px;transition:background .15s,color .15s}
+.auth-tab.active{background:var(--panel-2);color:var(--text)}
+#logout-btn{cursor:pointer}
+#logout-btn:hover{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 40%,var(--line))}

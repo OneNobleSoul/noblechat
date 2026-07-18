@@ -7,7 +7,7 @@
 <meta name="description" content="Private messaging over a real mix network with hybrid post-quantum encryption.">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260718f">
+<link rel="stylesheet" href="/style.css?v=20260718h">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◆</text></svg>">
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#06080c">
@@ -41,11 +41,17 @@
     <p class="tag">Private messaging over a real mix network · hybrid post-quantum encryption</p>
 
     <div class="setup-form">
-      <label>Pick a handle</label>
-      <input id="setup-handle" placeholder="e.g. kirito" autocomplete="off" spellcheck="false" maxlength="24">
-      <button id="setup-go" class="btn">Generate keys &amp; enter</button>
+      <div class="auth-tabs">
+        <button id="tab-login" class="auth-tab active">Sign in</button>
+        <button id="tab-register" class="auth-tab">Create account</button>
+      </div>
+      <label>Handle</label>
+      <input id="auth-user" placeholder="e.g. kirito" autocomplete="username" spellcheck="false" maxlength="24">
+      <label>Password</label>
+      <input id="auth-pass" type="password" placeholder="your password" autocomplete="current-password">
+      <button id="auth-go" class="btn">Sign in</button>
       <p id="setup-err" class="err" hidden></p>
-      <p class="fine">Your keys are generated here in your browser and never leave it. The server only ever sees fixed-size onion packets.</p>
+      <p class="fine">Your message keys are generated on this device and never leave it. Your password protects your account and syncs your contacts end-to-end &mdash; the server only ever sees a hash.</p>
     </div>
 
     <div id="keygen" class="keygen" hidden>
@@ -70,6 +76,7 @@
     <div class="top-right">
       <span class="pill secure" title="hybrid X25519+ML-KEM content encryption, Sphinx mix routing">🔒 PQ · Mixnet</span>
       <button id="cover-toggle" class="pill" title="Send indistinguishable dummy traffic to hide when you talk">cover: off</button>
+      <button id="logout-btn" class="pill" title="Sign out of this device">sign out</button>
     </div>
   </header>
 
@@ -114,7 +121,7 @@
 </div>
 
 <div id="toast" class="toast" hidden></div>
-<script src="/app.bundle.js?v=20260718f"></script>
-<script src="/register-sw.js?v=20260718f"></script>
+<script src="/app.bundle.js?v=20260718h"></script>
+<script src="/register-sw.js?v=20260718h"></script>
 </body>
 </html>
