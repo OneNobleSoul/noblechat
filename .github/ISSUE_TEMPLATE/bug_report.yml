@@ -1,0 +1,49 @@
+name: Bug report
+description: Report something that is broken or behaves incorrectly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please do not report security
+        vulnerabilities here. Use the private flow in SECURITY.md instead.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+      placeholder: When I do X, Y happens instead of Z.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: How can we reproduce it?
+      placeholder: |
+        1. Go to ...
+        2. Click ...
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Browser and version, operating system, client (web, desktop, Android), and how you deployed it.
+      placeholder: Firefox 130 on Linux, self hosted with docker compose
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste any relevant console output. Do not include secrets or private keys.
+    validations:
+      required: false
