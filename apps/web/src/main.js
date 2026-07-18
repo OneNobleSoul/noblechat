@@ -11,7 +11,7 @@ import {
 import { toB64, fromB64 } from "../../../packages/crypto/src/util.js";
 
 const $ = (s) => document.querySelector(s);
-const K = { token: "noblechat:token", user: "noblechat:user", dev: "noblechat:deviceId", id: "noblechat:id", bkey: "noblechat:bkey", contacts: "noblechat:contacts" };
+const K = { token: "noblechat:token", user: "noblechat:user", dev: "noblechat:deviceId", id: "noblechat:id", bkey: "noblechat:bkey", contacts: "noblechat:contacts", prefs: "noblechat:prefs" };
 const GATE_HASH = "b34f7fb73eea21931199bcd983951029b3df3ef407a7e58d617cf03747014f1a";
 const GATE_OK = "noblechat:gate-ok";
 
@@ -22,6 +22,7 @@ const state = {
   coverOn: true, coverTimer: null, netCols: [], stats: { sent: 0, cover: 0, recv: 0 },
   seen: new Set(), version: null, maintenance: false, statusTimer: null, authMode: "login",
   transport: "internal", nymAddress: null,
+  soundOn: true, muted: new Set(), blocked: new Set(), unread: new Map(),
 };
 
 const ls = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* */ } }, del: (k) => { try { localStorage.removeItem(k); } catch { /* */ } } };
@@ -33,6 +34,43 @@ function poisson(mean) { return -mean * Math.log(1 - Math.random()); }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function sha256Hex(str) { const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str)); return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join(""); }
+
+// ---- preferences (sound, per-chat mutes, blocks) ----
+// Persisted locally for this device and, for mutes/blocks, mirrored into the
+// same end-to-end encrypted blob as the contact list so they follow the account.
+function loadPrefs() {
+  try {
+    const p = JSON.parse(ls.get(K.prefs) || "{}");
+    if (typeof p.soundOn === "boolean") state.soundOn = p.soundOn;
+    if (Array.isArray(p.muted)) state.muted = new Set(p.muted);
+    if (Array.isArray(p.blocked)) state.blocked = new Set(p.blocked);
+  } catch { /* */ }
+}
+function savePrefs() {
+  ls.set(K.prefs, JSON.stringify({ soundOn: state.soundOn, muted: [...state.muted], blocked: [...state.blocked] }));
+}
+
+// ---- notification sound (WebAudio, no asset needed) ----
+let audioCtx = null;
+function beep() {
+  if (!state.soundOn) return;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    const now = audioCtx.currentTime;
+    const notes = [660, 880];
+    notes.forEach((freq, i) => {
+      const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+      o.type = "sine"; o.frequency.value = freq;
+      const t0 = now + i * 0.09;
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(0.14, t0 + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+      o.connect(g).connect(audioCtx.destination);
+      o.start(t0); o.stop(t0 + 0.18);
+    });
+  } catch { /* audio not available */ }
+}
 
 // ---- contacts-blob crypto (client-side; server only sees ciphertext) ----
 async function deriveBlobKey(password, username) {
@@ -153,6 +191,7 @@ async function registerDevice() {
 }
 
 async function afterAuth() {
+  loadPrefs();
   await loadMyBundle();
   loadContactsLocal();
   startApp();
@@ -171,6 +210,7 @@ function showKeygen(pct, label) {
 function startApp() {
   $("#app").hidden = false;
   $("#me-handle").textContent = state.user;
+  setMobileView("list");
   connectWS(); wireUI(); renderContacts();
 }
 
@@ -187,7 +227,11 @@ function saveContactsLocal() {
 }
 async function uploadContactsBlob() {
   if (!state.blobKey || !state.token) return;
-  try { const blob = await encryptBlob(state.blobKey, [...state.contacts.keys()]); await fetch("/api/account/blob", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: state.token, blob }) }); } catch { /* */ }
+  try {
+    const payload = { v: 2, contacts: [...state.contacts.keys()], muted: [...state.muted], blocked: [...state.blocked] };
+    const blob = await encryptBlob(state.blobKey, payload);
+    await fetch("/api/account/blob", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: state.token, blob }) });
+  } catch { /* */ }
 }
 async function loadContactsFromBlob() {
   if (!state.blobKey) return;
@@ -196,8 +240,15 @@ async function loadContactsFromBlob() {
     if (!r.ok) return;
     const { blob } = await r.json();
     if (!blob) return;
-    const handles = await decryptBlob(state.blobKey, blob);
-    for (const h of handles) if (!state.contacts.has(h)) await fetchBundle(h, { silent: true, noSave: true });
+    const data = await decryptBlob(state.blobKey, blob);
+    // v1 blobs were a bare array of handles; v2 carries mutes/blocks too.
+    const handles = Array.isArray(data) ? data : (data.contacts || []);
+    if (!Array.isArray(data)) {
+      for (const h of (data.muted || [])) state.muted.add(h);
+      for (const h of (data.blocked || [])) state.blocked.add(h);
+      savePrefs();
+    }
+    for (const h of handles) if (!state.contacts.has(h) && !state.blocked.has(h)) await fetchBundle(h, { silent: true, noSave: true });
     renderContacts();
   } catch { /* */ }
 }
@@ -206,6 +257,7 @@ async function fetchBundle(handle, { silent = true, noSave = false } = {}) {
   handle = String(handle).trim().toLowerCase();
   if (!handle) return false;
   if (handle === state.user) { if (!silent) toast("that's you"); return false; }
+  if (state.blocked.has(handle)) { if (!silent) toast(`${handle} is blocked - unblock them first`); return false; }
   try {
     const r = await fetch("/api/bundle?handle=" + encodeURIComponent(handle));
     if (!r.ok) { if (!silent) toast("no such handle online"); return false; }
@@ -252,10 +304,17 @@ function onDeliver(envelope) {
     const peer = content.to || "unknown"; ensureContact(peer);
     pushMessage(peer, { dir: "out", body: content.body, ts: content.ts || Date.now(), id: content.id });
   } else {
-    const from = content.from || "unknown"; ensureContact(from);
+    const from = content.from || "unknown";
+    if (state.blocked.has(from)) return; // blocked sender: drop silently
+    ensureContact(from);
     pushMessage(from, { dir: "in", body: content.body, ts: content.ts || Date.now(), id: content.id });
     state.stats.recv++; updateStats();
-    if (state.active !== from) toast(`new message from ${from}`);
+    const muted = state.muted.has(from);
+    if (state.active !== from) bumpUnread(from);
+    if (!muted && (state.active !== from || document.hidden)) {
+      beep();
+      if (state.active !== from) toast(`new message from ${from}`);
+    }
   }
 }
 
@@ -356,12 +415,117 @@ function pushMessage(handle, msg) {
 }
 function setActive(handle) {
   state.active = handle; $("#chat-empty").hidden = true; $("#chat-view").hidden = false; $("#chat-with").textContent = handle;
-  renderContacts(); renderMessages(); $("#msg-input").focus();
+  clearUnread(handle);
+  renderContacts(); renderMessages(); setMobileView("chat");
+  const mi = $("#msg-input"); if (mi) mi.focus();
 }
+function bumpUnread(handle) { state.unread.set(handle, (state.unread.get(handle) || 0) + 1); renderContacts(); }
+function clearUnread(handle) { if (state.unread.delete(handle)) renderContacts(); }
+
+// On phones the sidebar and the chat occupy the same space; #app[data-view]
+// decides which one is shown. On wide screens both are always visible and the
+// attribute is ignored by the CSS.
+function setMobileView(view) { const app = $("#app"); if (app) app.dataset.view = view; }
+
 function renderContacts() {
   const el = $("#contacts");
-  el.innerHTML = [...state.contacts.keys()].map((h) => `<div class="contact ${h === state.active ? "active" : ""}" data-h="${esc(h)}"><div class="avatar">${esc(h[0] || "?").toUpperCase()}</div><div><div class="h">${esc(h)}</div><div class="s">post-quantum · mixnet</div></div></div>`).join("") || `<div class="net-note" style="padding:12px">No contacts yet. Add someone by their handle above.</div>`;
-  el.querySelectorAll(".contact").forEach((n) => n.addEventListener("click", () => setActive(n.dataset.h)));
+  const handles = [...state.contacts.keys()];
+  if (!handles.length) {
+    el.innerHTML = `<div class="net-note" style="padding:12px">No contacts yet. Add someone by their handle above.</div>`;
+  } else {
+    el.innerHTML = handles.map((h) => {
+      const unread = state.unread.get(h) || 0;
+      const badge = unread ? `<span class="badge">${unread > 99 ? "99+" : unread}</span>` : "";
+      const muteIcon = state.muted.has(h) ? `<span class="mini-icon" title="muted">🔕</span>` : "";
+      return `<div class="contact ${h === state.active ? "active" : ""} ${unread ? "has-unread" : ""}" data-h="${esc(h)}">
+        <div class="avatar">${esc(h[0] || "?").toUpperCase()}</div>
+        <div class="c-main"><div class="h">${esc(h)} ${muteIcon}</div><div class="s">post-quantum · mixnet</div></div>
+        ${badge}
+        <button class="row-menu" data-menu="${esc(h)}" title="Options" aria-label="Options">⋮</button>
+      </div>`;
+    }).join("");
+  }
+  el.querySelectorAll(".contact").forEach((n) => n.addEventListener("click", (e) => {
+    if (e.target.closest(".row-menu")) return; // menu button handled separately
+    setActive(n.dataset.h);
+  }));
+  el.querySelectorAll(".row-menu").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); openContactMenu(b.dataset.menu, b); }));
+  renderBlocked();
+}
+
+function renderBlocked() {
+  const wrap = $("#blocked-wrap"); if (!wrap) return;
+  const list = [...state.blocked];
+  wrap.hidden = list.length === 0;
+  $("#blocked-count").textContent = String(list.length);
+  const box = $("#blocked-list");
+  box.innerHTML = list.map((h) => `<div class="blocked-row"><span>${esc(h)}</span><button class="btn-sm unblock" data-h="${esc(h)}">Unblock</button></div>`).join("");
+  box.querySelectorAll(".unblock").forEach((b) => b.addEventListener("click", () => unblock(b.dataset.h)));
+}
+
+// ---------- per-chat actions: mute, block, delete ----------
+function toggleMute(handle) {
+  if (state.muted.has(handle)) { state.muted.delete(handle); toast(`unmuted ${handle}`); }
+  else { state.muted.add(handle); toast(`muted ${handle}`); }
+  savePrefs(); uploadContactsBlob(); renderContacts();
+}
+function deleteChat(handle) {
+  state.convos.delete(handle); state.contacts.delete(handle); state.unread.delete(handle); state.muted.delete(handle);
+  if (state.active === handle) { state.active = null; $("#chat-view").hidden = true; $("#chat-empty").hidden = false; setMobileView("list"); }
+  saveContactsLocal(); savePrefs(); uploadContactsBlob(); renderContacts();
+  toast(`deleted chat with ${handle}`);
+}
+function clearMessages(handle) {
+  state.convos.set(handle, []);
+  if (state.active === handle) renderMessages();
+  toast(`cleared messages with ${handle}`);
+}
+function block(handle) {
+  state.blocked.add(handle);
+  state.convos.delete(handle); state.contacts.delete(handle); state.unread.delete(handle); state.muted.delete(handle);
+  if (state.active === handle) { state.active = null; $("#chat-view").hidden = true; $("#chat-empty").hidden = false; setMobileView("list"); }
+  saveContactsLocal(); savePrefs(); uploadContactsBlob(); renderContacts();
+  toast(`blocked ${handle}`);
+}
+function unblock(handle) {
+  state.blocked.delete(handle); savePrefs(); uploadContactsBlob(); renderContacts();
+  toast(`unblocked ${handle}`);
+}
+
+// ---------- small popup menu ----------
+function closeMenus() { document.querySelectorAll(".menu-pop.open").forEach((m) => { m.classList.remove("open"); m.hidden = true; }); }
+function buildMenu(pop, handle, { includeClear = false } = {}) {
+  const muted = state.muted.has(handle);
+  const items = [
+    { label: muted ? "🔔 Unmute" : "🔕 Mute", act: () => toggleMute(handle) },
+  ];
+  if (includeClear) items.push({ label: "🧹 Clear messages", act: () => clearMessages(handle) });
+  items.push({ label: "🚫 Block", act: () => block(handle), danger: true });
+  items.push({ label: "🗑 Delete chat", act: () => deleteChat(handle), danger: true });
+  pop.innerHTML = "";
+  for (const it of items) {
+    const b = document.createElement("button");
+    b.className = "menu-item" + (it.danger ? " danger" : "");
+    b.textContent = it.label;
+    b.addEventListener("click", (e) => { e.stopPropagation(); closeMenus(); it.act(); });
+    pop.appendChild(b);
+  }
+}
+function openContactMenu(handle, anchor) {
+  const existing = document.getElementById("row-menu-pop");
+  const pop = existing || Object.assign(document.createElement("div"), { id: "row-menu-pop", className: "menu-pop" });
+  if (!existing) document.body.appendChild(pop);
+  buildMenu(pop, handle);
+  const r = anchor.getBoundingClientRect();
+  pop.style.position = "fixed"; pop.style.top = `${r.bottom + 4}px`; pop.style.left = `${Math.min(r.left, window.innerWidth - 190)}px`;
+  const wasOpen = pop.classList.contains("open"); closeMenus();
+  if (!wasOpen) { pop.hidden = false; pop.classList.add("open"); }
+}
+function openChatMenu() {
+  const pop = $("#chat-menu-pop"); if (!state.active) return;
+  buildMenu(pop, state.active, { includeClear: true });
+  const wasOpen = pop.classList.contains("open"); closeMenus();
+  if (!wasOpen) { pop.hidden = false; pop.classList.add("open"); }
 }
 function renderMessages() {
   const el = $("#messages"); const msgs = state.convos.get(state.active) || [];
@@ -378,6 +542,13 @@ function toggleCover() {
 }
 function scheduleCover() { clearTimeout(state.coverTimer); state.coverTimer = setTimeout(() => { sendCover(); if (state.coverOn) scheduleCover(); }, poisson(3500) + 800); }
 function sendCover() { if (!state.ws || state.ws.readyState !== 1) return; try { activeTransport().submit(state.identity.card, { t: "cover", ts: 0 }); state.stats.cover++; updateStats(); } catch { /* */ } }
+
+// ---------- notification sound toggle ----------
+function renderSoundToggle() { const b = $("#sound-toggle"); if (!b) return; b.textContent = state.soundOn ? "🔔" : "🔕"; b.classList.toggle("on", state.soundOn); b.title = state.soundOn ? "Message sound: on" : "Message sound: off"; }
+function toggleSound() {
+  state.soundOn = !state.soundOn; savePrefs(); renderSoundToggle();
+  if (state.soundOn) { beep(); toast("message sound on"); } else toast("message sound off");
+}
 
 // ---------- mix viz ----------
 function buildNetViz() {
@@ -396,6 +567,12 @@ function wireUI() {
   $("#msg-input").addEventListener("keydown", (e) => e.key === "Enter" && sendMessage());
   const cover = $("#cover-toggle"); cover.addEventListener("click", toggleCover); cover.textContent = "cover: " + (state.coverOn ? "on" : "off"); cover.classList.toggle("on", state.coverOn);
   const lo = $("#logout-btn"); if (lo) lo.addEventListener("click", logout);
+  const snd = $("#sound-toggle"); if (snd) snd.addEventListener("click", toggleSound); renderSoundToggle();
+  const back = $("#chat-back"); if (back) back.addEventListener("click", () => setMobileView("list"));
+  const cmenu = $("#chat-menu"); if (cmenu) cmenu.addEventListener("click", (e) => { e.stopPropagation(); openChatMenu(); });
+  const btgl = $("#blocked-toggle"); if (btgl) btgl.addEventListener("click", () => { const l = $("#blocked-list"); l.hidden = !l.hidden; });
+  document.addEventListener("click", (e) => { if (!e.target.closest(".menu-pop") && !e.target.closest(".row-menu") && !e.target.closest("#chat-menu")) closeMenus(); });
+  window.addEventListener("focus", () => { if (state.active) clearUnread(state.active); });
   updateStats();
 }
 async function logout() {
