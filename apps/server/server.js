@@ -46,8 +46,16 @@ const CFG = {
 };
 
 function computeVersion() {
-  try { return crypto.createHash("sha256").update(fs.readFileSync(path.join(PUBLIC, "app.bundle.js"))).digest("hex").slice(0, 12); }
-  catch { return "dev"; }
+  // Hash the bundle AND the stylesheet so any front-end change bumps the
+  // version and busts client caches (a CSS-only change used to ship invisibly
+  // because the ?v= query never moved).
+  try {
+    const h = crypto.createHash("sha256");
+    for (const f of ["app.bundle.js", "style.css"]) {
+      try { h.update(fs.readFileSync(path.join(PUBLIC, f))); } catch { /* */ }
+    }
+    return h.digest("hex").slice(0, 12);
+  } catch { return "dev"; }
 }
 const APP_VERSION = process.env.APP_VERSION || computeVersion();
 
@@ -207,9 +215,17 @@ async function main() {
     let rel = req.url.split("?")[0]; if (rel === "/") rel = "/index.html";
     const file = path.join(PUBLIC, path.normalize(rel).replace(/^(\.\.[/\\])+/, ""));
     if (!file.startsWith(PUBLIC)) { res.writeHead(403).end(); return; }
+    const isHtml = file.endsWith("index.html");
     fs.readFile(file, (err, data) => {
       if (err) { res.writeHead(404).end("not found"); return; }
-      res.writeHead(200, { "content-type": MIME[path.extname(file)] || "application/octet-stream" });
+      const headers = { "content-type": MIME[path.extname(file)] || "application/octet-stream" };
+      if (isHtml) {
+        // Stamp the asset URLs with the current build version and never cache the
+        // HTML itself, so a new build always loads fresh CSS/JS.
+        data = Buffer.from(data.toString("utf8").replace(/__V__/g, APP_VERSION));
+        headers["Cache-Control"] = "no-cache";
+      }
+      res.writeHead(200, headers);
       res.end(data);
     });
   }
@@ -291,6 +307,21 @@ async function main() {
         const devices = await store.deviceBundle(handle);
         if (!devices.length) { res.writeHead(404).end("{}"); return; }
         return json(res, 200, { handle, devices });
+      }
+      // Presence: a handle is "online" if any of its devices currently holds a
+      // live mailbox subscription. Signed-in callers only, so it is not an open
+      // presence oracle. Kept coarse (per handle, no timestamps).
+      if (url.pathname === "/api/presence") {
+        if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" });
+        const username = await sessionUser(url.searchParams.get("token"));
+        if (!username) return json(res, 401, { error: "not signed in" });
+        const handles = String(url.searchParams.get("handles") || "").toLowerCase().split(",").filter((h) => HANDLE_RE.test(h)).slice(0, 100);
+        const online = {};
+        for (const h of handles) {
+          const mbks = await store.deviceMbkeys(h);
+          online[h] = mbks.some((k) => { const s = mbkeySockets.get(k); return !!(s && s.size > 0); });
+        }
+        return json(res, 200, { online });
       }
       if (url.pathname === "/api/account/blob") {
         if (req.method === "GET") {
