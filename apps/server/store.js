@@ -12,8 +12,10 @@ CREATE TABLE IF NOT EXISTS accounts (
   username    TEXT PRIMARY KEY,
   pass        TEXT NOT NULL,
   created_at  BIGINT NOT NULL,
-  banned      BOOLEAN NOT NULL DEFAULT FALSE
+  banned      BOOLEAN NOT NULL DEFAULT FALSE,
+  is_admin    BOOLEAN NOT NULL DEFAULT FALSE
 );
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE;
 CREATE TABLE IF NOT EXISTS devices (
   device_id   TEXT PRIMARY KEY,
   username    TEXT NOT NULL REFERENCES accounts(username) ON DELETE CASCADE,
@@ -66,8 +68,16 @@ export async function openStore(databaseUrl, { mailboxTtlMs = 7 * 24 * 3600 * 10
       await pool.query("INSERT INTO accounts(username,pass,created_at) VALUES($1,$2,$3)", [username, passStr, now()]);
     },
     async getAccount(username) {
-      const r = await pool.query("SELECT username,pass,banned FROM accounts WHERE username=$1", [username]);
+      const r = await pool.query("SELECT username,pass,banned,is_admin FROM accounts WHERE username=$1", [username]);
       return r.rows[0] || null;
+    },
+    async isAdmin(username) {
+      const r = await pool.query("SELECT is_admin FROM accounts WHERE username=$1", [username]);
+      return r.rows[0] ? !!r.rows[0].is_admin : false;
+    },
+    async setAdmin(username, on) {
+      const r = await pool.query("UPDATE accounts SET is_admin=$2 WHERE username=$1", [username, !!on]);
+      return r.rowCount > 0;
     },
 
     // ---- devices ----
@@ -160,7 +170,7 @@ export async function openStore(databaseUrl, { mailboxTtlMs = 7 * 24 * 3600 * 10
     },
     async listAccounts(limit = 500) {
       const r = await pool.query(
-        `SELECT a.username, a.created_at, a.banned,
+        `SELECT a.username, a.created_at, a.banned, a.is_admin,
                 (SELECT COUNT(*) FROM devices d WHERE d.username=a.username) AS devices,
                 COALESCE((SELECT s.value FROM settings s WHERE s.key='banreason:'||a.username),'') AS reason
          FROM accounts a ORDER BY a.created_at DESC LIMIT $1`, [limit]);

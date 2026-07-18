@@ -17,8 +17,17 @@ async function signIn(t) {
   token = t;
   try {
     const s = await api("/api/admin/status");
-    if (s && typeof s.users !== "undefined") { sessionStorage.setItem(TOKEN_KEY, token); showDash(true); renderStatus(s); await loadUsers(); }
+    if (s && typeof s.users !== "undefined") { sessionStorage.setItem(TOKEN_KEY, token); showDash(true); renderStatus(s); await loadUsers(); await loadLogs(); }
     else throw new Error("bad");
+  } catch { $("#login-err").classList.remove("hidden"); }
+}
+async function signInAccount(username, password) {
+  $("#login-err").classList.add("hidden");
+  try {
+    const res = await fetch("/api/admin/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username, password }) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok || !d.token) { $("#login-err").textContent = d.error || "Invalid credentials."; $("#login-err").classList.remove("hidden"); return; }
+    await signIn(d.token);
   } catch { $("#login-err").classList.remove("hidden"); }
 }
 function signOut() { sessionStorage.removeItem(TOKEN_KEY); token = ""; showDash(false); }
@@ -110,11 +119,14 @@ async function loadUsers() {
   $("#users-empty").classList.toggle("hidden", active.length > 0);
   for (const u of active) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${esc(u.username)}</td><td>${u.devices || 0}</td><td class="muted">${fmtTime(u.created_at)}</td>`;
+    const badge = u.is_admin ? ` <span class="pill on">admin</span>` : "";
+    tr.innerHTML = `<td>${esc(u.username)}${badge}</td><td>${u.devices || 0}</td><td class="muted">${fmtTime(u.created_at)}</td>`;
     const td = document.createElement("td"); td.style.textAlign = "right";
+    const adm = document.createElement("button"); adm.className = "btn ghost"; adm.textContent = u.is_admin ? "Revoke admin" : "Make admin";
+    adm.onclick = () => setAdmin(u.username, !u.is_admin);
     const ban = document.createElement("button"); ban.className = "btn warn"; ban.textContent = "Ban"; ban.onclick = () => act("ban", u.username);
     const del = document.createElement("button"); del.className = "btn danger"; del.textContent = "Delete"; del.onclick = () => act("delete", u.username);
-    td.appendChild(ban); td.appendChild(del); tr.appendChild(td); tb.appendChild(tr);
+    td.appendChild(adm); td.appendChild(ban); td.appendChild(del); tr.appendChild(td); tb.appendChild(tr);
   }
 
   const bt = $("#bans"); bt.innerHTML = "";
@@ -128,6 +140,11 @@ async function loadUsers() {
     td.appendChild(un); td.appendChild(del); tr.appendChild(td); bt.appendChild(tr);
   }
 }
+async function setAdmin(handle, on) {
+  if (!on && !confirm("Revoke admin from " + handle + "?")) return;
+  await api("/api/admin/setadmin", "POST", { handle, admin: on });
+  await refresh();
+}
 async function act(kind, handle) {
   if (kind === "ban") { const reason = prompt("Ban " + handle + " - reason (optional):", ""); if (reason === null) return; await api("/api/admin/ban", "POST", { handle, reason }); }
   else if (kind === "delete") { if (!confirm("Delete account " + handle + "? Removes all its devices and queued messages.")) return; await api("/api/admin/delete", "POST", { handle }); }
@@ -137,6 +154,8 @@ async function act(kind, handle) {
 
 $("#login-go").addEventListener("click", () => signIn($("#token").value.trim()));
 $("#token").addEventListener("keydown", (e) => { if (e.key === "Enter") signIn($("#token").value.trim()); });
+$("#login-acct").addEventListener("click", () => signInAccount($("#login-user").value.trim().toLowerCase(), $("#login-pass").value));
+$("#login-pass").addEventListener("keydown", (e) => { if (e.key === "Enter") signInAccount($("#login-user").value.trim().toLowerCase(), $("#login-pass").value); });
 $("#refresh").addEventListener("click", refresh);
 $("#logout").addEventListener("click", signOut);
 $("#ann-save").addEventListener("click", async () => { await api("/api/admin/announce", "POST", { text: $("#ann").value }); await refresh(); });
