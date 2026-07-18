@@ -33,7 +33,11 @@ honest gap analysis.
   contacts blob.
 - Accounts with password login, multi device fan out, and durable offline
   delivery backed by PostgreSQL.
-- An admin panel for announcements, maintenance mode, and moderation.
+- A switchable transport: the built-in mix network, or the public Nym mixnet
+  via an optional nym-client sidecar. The gateway falls back to the internal
+  network if the sidecar is not reachable.
+- An admin panel for announcements, maintenance mode, moderation, a server event
+  log, runtime stats, mix node health and the transport switch.
 - Installable clients: a PWA (desktop, Android, iOS home screen) plus native
   desktop and Android builds produced by CI.
 
@@ -70,6 +74,14 @@ docker compose up -d --build
 The gateway listens on port 8790 inside the compose network. Put a reverse proxy
 (for example Caddy or nginx) in front of it for TLS. The compose file also starts
 the mix nodes, the providers, and a PostgreSQL database.
+
+To route over the public Nym mixnet instead of the internal one, set
+`NYM_CLIENT_URL=ws://nym-client:1977` in `.env`. That starts the bundled
+nym-client sidecar, which registers an identity on the Nym network (its data
+lives in a named volume, so the address is stable across restarts). Once the
+admin panel shows the sidecar connected, flip the transport there. Clients then
+load the Nym web client on demand and send over the mixnet; leaving
+`NYM_CLIENT_URL` empty keeps everything on the internal network.
 
 ## Development
 
