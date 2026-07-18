@@ -2,7 +2,7 @@
 // locally. Accounts add authenticated handle ownership + multi-device fan-out
 // without ever handing the server a private key or a plaintext password.
 import {
-  generateIdentityStaged, buildOutgoing, openIncoming,
+  generateIdentityStaged, buildOutgoing, buildInner, openIncoming,
 } from "../../../packages/net/src/client.js";
 import {
   makeBrowserNet, serializePacket, serializeCard, deserializeCard,
@@ -21,7 +21,7 @@ const state = {
   myBundle: [], contacts: new Map(), convos: new Map(), active: null,
   coverOn: true, coverTimer: null, netCols: [], stats: { sent: 0, cover: 0, recv: 0 },
   seen: new Set(), version: null, maintenance: false, statusTimer: null, authMode: "login",
-  transport: "internal",
+  transport: "internal", nymAddress: null,
 };
 
 const ls = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* */ } }, del: (k) => { try { localStorage.removeItem(k); } catch { /* */ } } };
@@ -261,15 +261,59 @@ function onDeliver(envelope) {
 
 // ---------- transport dispatch ----------
 // The server announces which transport is active: "internal" is our own mix
-// network, "nym" the public Nym mixnet. All sends go through this dispatch so
-// the nym client integration only has to add an entry here. Until that lands
-// we keep routing over the internal path even if the server flips the switch,
-// so an early flip cannot strand messages from clients like this one.
+// network, "nym" the public Nym mixnet. All sends go through this dispatch.
+//
+// The nym client is a heavy WASM bundle, so it is loaded lazily the first time
+// nym mode is seen and takes a few seconds to connect to a gateway. Until it is
+// ready (or if it fails), nym.submit() falls back to the internal path so no
+// message is ever silently dropped during the switch-over. Receiving keeps
+// using the gateway websocket subscription in both modes; only the uplink is
+// anonymised over Nym at this stage.
+function internalSubmit(card, content) {
+  const { firstNodeId, packet } = buildOutgoing(state.net, card, content);
+  state.ws.send(JSON.stringify({ t: "submit", node: toB64(firstNodeId), packet: serializePacket(packet) }));
+}
+
+const nymClient = { loading: false, script: false, api: null };
+
+function loadNymScript() {
+  if (nymClient.script) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const s = document.createElement("script");
+    s.src = "/nym-transport.bundle.js";
+    s.onload = () => { nymClient.script = true; resolve(true); };
+    s.onerror = () => resolve(false);
+    document.head.appendChild(s);
+  });
+}
+
+async function ensureNymClient() {
+  if (nymClient.api) return nymClient.api;
+  if (nymClient.loading) return null;
+  nymClient.loading = true;
+  try {
+    const ok = await loadNymScript();
+    if (!ok || !window.NobleNym) return null;
+    nymClient.api = await window.NobleNym.create({
+      onReady: () => toast("connected to the Nym mixnet"),
+      onError: (m) => toast("nym client error: " + m),
+    });
+    return nymClient.api;
+  } catch { return null; }
+  finally { nymClient.loading = false; }
+}
+
 const transports = {
-  internal: {
+  internal: { submit: internalSubmit },
+  nym: {
     submit(card, content) {
-      const { firstNodeId, packet } = buildOutgoing(state.net, card, content);
-      state.ws.send(JSON.stringify({ t: "submit", node: toB64(firstNodeId), packet: serializePacket(packet) }));
+      const c = nymClient.api;
+      // Not ready yet: keep messaging working over the internal path and warm
+      // up the nym client in the background for subsequent sends.
+      if (!c || !c.isReady() || !state.nymAddress) { ensureNymClient(); internalSubmit(card, content); return; }
+      const { providerId, inner } = buildInner(card, content);
+      const payload = JSON.stringify({ v: 1, p: toB64(providerId), i: toB64(inner) });
+      c.send(payload, state.nymAddress).catch(() => internalSubmit(card, content));
     },
   },
 };
@@ -364,6 +408,8 @@ function ensureEl(id, cls, parent) { let el = document.getElementById(id); if (!
 async function pollStatus() { try { const r = await fetch("/api/status"); if (r.ok) applyStatus(await r.json()); } catch { /* */ } }
 function applyStatus(s) {
   if (s.transport && s.transport !== state.transport) state.transport = s.transport;
+  if (typeof s.nymAddress === "string") state.nymAddress = s.nymAddress;
+  if (state.transport === "nym") ensureNymClient();
   if (s.version) { if (state.version && s.version !== state.version) offerUpdate(); else if (!state.version) state.version = s.version; }
   const ann = String(s.announcement || "").trim(); const banner = ensureEl("nc-announce", "nc-announce");
   if (ann) { banner.textContent = "\u{1F4E2}  " + ann; banner.hidden = false; } else banner.hidden = true;

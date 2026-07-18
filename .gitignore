@@ -4,8 +4,9 @@ dist/
 .DS_Store
 .env
 
-# generated web bundle
+# generated web bundles
 apps/web/public/app.bundle.js
+apps/web/public/nym-transport.bundle.js
 
 # local runtime data (sqlite)
 data/

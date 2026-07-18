@@ -53,8 +53,13 @@ function renderTransport(s) {
   $("#tr-internal").classList.toggle("active", mode === "internal");
   $("#tr-nym").classList.toggle("active", mode === "nym");
   const nymOk = !!s.nymConfigured;
-  $("#tr-nym").disabled = !nymOk && mode !== "nym";
-  $("#tr-nym-state").textContent = nymOk ? "" : "(sidecar not configured)";
+  const nymConn = !!s.nymConnected;
+  $("#tr-nym").disabled = !nymConn && mode !== "nym";
+  let note = "";
+  if (!nymOk) note = "(sidecar not configured)";
+  else if (!nymConn) note = "(sidecar configured, connecting…)";
+  else if (s.nymAddress) note = "connected · " + s.nymAddress.slice(0, 18) + "…";
+  $("#tr-nym-state").textContent = note;
 }
 async function setTransport(mode) {
   const err = $("#tr-err"); err.classList.add("hidden");

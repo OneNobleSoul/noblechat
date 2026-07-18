@@ -36,11 +36,31 @@ services:
       PER_LAYER: "2"
       PROVIDERS: "2"
       MIX_PORT: "8890"
+      NYM_CLIENT_URL: ${NYM_CLIENT_URL:-}
     expose:
       - "8790"
     networks:
       - jarvis20_default
       - noblechat_internal
+
+  # Optional sidecar holding our identity on the public Nym mixnet. Only the
+  # gateway talks to it (internal network, nothing published). Enable the nym
+  # transport in the admin panel once this is up and connected.
+  nym-client:
+    build: deploy/nym
+    container_name: nc-nym-client
+    restart: unless-stopped
+    volumes:
+      - nym-client-data:/root/.nym
+    expose:
+      - "1977"
+    networks:
+      - noblechat_internal
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/1977'"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
 
   mix-l0-0:
     image: noblechat:local
@@ -234,3 +254,4 @@ networks:
 
 volumes:
   noblechat-db:
+  nym-client-data:
