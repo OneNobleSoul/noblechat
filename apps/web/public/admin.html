@@ -51,11 +51,16 @@ th{color:var(--dim);font-family:var(--mono);font-size:11px;text-transform:upperc
 <div class="wrap">
   <div id="login" class="card">
     <h1>◆ NobleChat Admin</h1>
-    <p class="sub">Restricted. Enter the admin token.</p>
-    <label>Admin token</label>
+    <p class="sub">Restricted. Sign in with an admin account.</p>
+    <label>Handle</label>
+    <input id="login-user" type="text" placeholder="handle" autocomplete="username">
+    <label>Password</label>
+    <input id="login-pass" type="password" placeholder="password" autocomplete="current-password">
+    <button id="login-acct" class="btn">Sign in</button>
+    <p class="muted" style="margin:16px 0 6px">Or use the admin token</p>
     <input id="token" type="password" placeholder="admin token" autocomplete="off">
-    <button id="login-go" class="btn">Sign in</button>
-    <p id="login-err" class="err hidden">Invalid token.</p>
+    <button id="login-go" class="btn ghost">Sign in with token</button>
+    <p id="login-err" class="err hidden">Invalid credentials.</p>
   </div>
 
   <div id="dash" class="hidden">

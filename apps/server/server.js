@@ -170,10 +170,18 @@ async function main() {
   const authLimit = rateLimiter({ capacity: 10, refillPerSec: 0.5 }); // login/register brute-force guard
   const submitLimit = rateLimiter({ capacity: 120, refillPerSec: 40 });
 
-  const requireAdmin = (req, res) => {
+  // Admin access is granted two ways: the shared ADMIN_TOKEN (bootstrap / owner)
+  // or a session token belonging to an account flagged is_admin. The latter lets
+  // named accounts (e.g. noblesoul) sign into the panel with their own login.
+  const requireAdmin = async (req, res) => {
     const m = /^Bearer (.+)$/.exec(req.headers["authorization"] || "");
-    if (!CFG.adminToken || !m || !timingEqual(m[1], CFG.adminToken)) { json(res, 401, { error: "unauthorized" }); return false; }
-    return true;
+    if (!m) { json(res, 401, { error: "unauthorized" }); return false; }
+    const tok = m[1];
+    if (CFG.adminToken && timingEqual(tok, CFG.adminToken)) return true;
+    const user = await sessionUser(tok);
+    if (user && (await store.isAdmin(user)) && !(await store.isBanned(user))) return true;
+    json(res, 401, { error: "unauthorized" });
+    return false;
   };
   async function sessionUser(token) { if (!token || typeof token !== "string") return null; const s = await store.getSession(token); return s ? s.username : null; }
 
@@ -287,7 +295,23 @@ async function main() {
 
       // ---- admin ----
       if (url.pathname.startsWith("/api/admin/")) {
-        if (!requireAdmin(req, res)) return;
+        // Sign-in is the only admin route reachable without an admin credential.
+        if (url.pathname === "/api/admin/login" && req.method === "POST") {
+          if (!authLimit(ip)) return json(res, 429, { error: "too many attempts" });
+          try {
+            const b = JSON.parse(await readBody(req, CFG.maxBodyBytes));
+            const username = String(b.username || "").toLowerCase();
+            const acc = await store.getAccount(username);
+            if (!acc || !verifyPassword(String(b.password || ""), acc.pass)) return json(res, 401, { error: "wrong handle or password" });
+            if (acc.banned) return json(res, 403, { error: "account suspended" });
+            if (!acc.is_admin) return json(res, 403, { error: "not an admin account" });
+            const token = crypto.randomBytes(32).toString("hex");
+            await store.createSession(token, username, CFG.sessionTtlMs);
+            elog.add("info", "admin signed in", username);
+            return json(res, 200, { token, username });
+          } catch { return json(res, 400, { error: "bad request" }); }
+        }
+        if (!(await requireAdmin(req, res))) return;
         if (url.pathname === "/api/admin/status" && req.method === "GET") {
           const s = await store.stats();
           return json(res, 200, {
@@ -344,6 +368,7 @@ async function main() {
           }
           if (url.pathname === "/api/admin/ban") { if (!HANDLE_RE.test(handle)) return json(res, 400, { error: "bad handle" }); const mbk = await store.banAccount(handle, String(body.reason || "").slice(0, 200)); await refreshBans(); elog.add("warn", "account banned", handle); for (const k of mbk) { const set = mbkeySockets.get(k); if (set) for (const ws of set) { try { ws.close(4003, "banned"); } catch { /* */ } } } return json(res, 200, { ok: true }); }
           if (url.pathname === "/api/admin/unban") { await store.unbanAccount(handle); await refreshBans(); elog.add("info", "account unbanned", handle); return json(res, 200, { ok: true }); }
+          if (url.pathname === "/api/admin/setadmin") { if (!HANDLE_RE.test(handle)) return json(res, 400, { error: "bad handle" }); const ok = await store.setAdmin(handle, !!body.admin); if (!ok) return json(res, 404, { error: "no such account" }); elog.add("warn", body.admin ? "admin granted" : "admin revoked", handle); return json(res, 200, { ok: true }); }
           if (url.pathname === "/api/admin/delete") { const mbk = await store.deleteAccount(handle); await refreshBans(); elog.add("warn", "account deleted", handle); for (const k of mbk) { const set = mbkeySockets.get(k); if (set) for (const ws of set) { try { ws.close(4004, "removed"); } catch { /* */ } } } return json(res, 200, { ok: true }); }
         }
         return json(res, 404, { error: "not found" });
