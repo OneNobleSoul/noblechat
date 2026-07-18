@@ -58,8 +58,14 @@ const MIME = {
 const CSP = [
   "default-src 'self'", "base-uri 'self'", "object-src 'none'", "frame-ancestors 'none'",
   "img-src 'self' data:", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src 'self' https://fonts.gstatic.com", "script-src 'self'",
-  "connect-src 'self' ws: wss:", "manifest-src 'self'", "worker-src 'self'",
+  "font-src 'self' https://fonts.gstatic.com",
+  // 'wasm-unsafe-eval' lets the lazily-loaded nym transport instantiate its
+  // WebAssembly mix client; it does not permit JS eval.
+  "script-src 'self' 'wasm-unsafe-eval'",
+  // https: for the nym validator API and gateways the WASM client dials.
+  "connect-src 'self' ws: wss: https:", "manifest-src 'self'",
+  // blob: for the nym SDK's web worker.
+  "worker-src 'self' blob:", "child-src 'self' blob:",
 ].join("; ");
 function setSecurityHeaders(res) {
   res.setHeader("Content-Security-Policy", CSP);

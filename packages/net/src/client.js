@@ -65,6 +65,18 @@ export function buildOutgoing(net, recipientCard, contentObj) {
   return { firstNodeId: path[0].id, packet };
 }
 
+// Build the inner packet (mailbox + sealed envelope) for the nym transport.
+// Nym does its own sphinx routing, so we skip our internal onion layers and
+// hand the gateway exactly what a provider node would deliver: the recipient's
+// providerId (to key the mailbox) plus the inner bytes. The end-to-end
+// envelope is identical to the internal path, so the server still learns
+// nothing about content.
+export function buildInner(recipientCard, contentObj) {
+  const envelope = sealEnvelope(recipientCard.kem, encodeContent(contentObj));
+  const inner = packInner(recipientCard.mailbox, envelope);
+  return { providerId: recipientCard.providerId, inner };
+}
+
 // Decrypt a delivered envelope with our own keys.
 export function openIncoming(identity, envelope) {
   return decodeContent(openEnvelope(identity.kem, envelope));
