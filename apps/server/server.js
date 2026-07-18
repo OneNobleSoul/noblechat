@@ -41,7 +41,7 @@ const CFG = {
   perLayer: Number(process.env.PER_LAYER || 2),
   providers: Number(process.env.PROVIDERS || 2),
   internalToken: process.env.INTERNAL_TOKEN || "",
-  nymClientUrl: process.env.NYM_CLIENT_URL || "",
+  nymClientUrl: process.env.NYM_CLIENT_URL || "", // e.g. ws://nym-client:1977 once the sidecar exists
 };
 
 function computeVersion() {
