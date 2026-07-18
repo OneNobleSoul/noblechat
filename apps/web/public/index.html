@@ -75,6 +75,7 @@
     <span class="me">you are <b id="me-handle">…</b></span>
     <div class="top-right">
       <span class="pill secure" title="hybrid X25519+ML-KEM content encryption, Sphinx mix routing">🔒 PQ · Mixnet</span>
+      <button id="sound-toggle" class="pill" title="Notification sound for new messages">🔔</button>
       <button id="cover-toggle" class="pill" title="Send indistinguishable dummy traffic to hide when you talk">cover: off</button>
       <button id="logout-btn" class="pill" title="Sign out of this device">sign out</button>
     </div>
@@ -86,6 +87,10 @@
       <button id="add-go" class="btn-sm">+</button>
     </div>
     <div id="contacts" class="contacts"></div>
+    <div id="blocked-wrap" class="blocked-wrap" hidden>
+      <button id="blocked-toggle" class="blocked-toggle">Blocked · <span id="blocked-count">0</span></button>
+      <div id="blocked-list" class="blocked-list" hidden></div>
+    </div>
     <div class="net-panel">
       <div class="net-title">MIX NETWORK</div>
       <div id="net-layers" class="net-layers"></div>
@@ -108,8 +113,13 @@
     </div>
     <div id="chat-view" class="chat-view" hidden>
       <div class="chat-head">
+        <button id="chat-back" class="icon-btn back" title="Back to chats" aria-label="Back to chats">‹</button>
         <span id="chat-with" class="chat-with">…</span>
-        <span class="pill tiny">end-to-end · post-quantum · mixnet-routed</span>
+        <span class="pill tiny hide-sm">end-to-end · post-quantum · mixnet-routed</span>
+        <div class="chat-menu-wrap">
+          <button id="chat-menu" class="icon-btn" title="Chat options" aria-label="Chat options" aria-haspopup="true">⋮</button>
+          <div id="chat-menu-pop" class="menu-pop" hidden></div>
+        </div>
       </div>
       <div id="messages" class="messages"></div>
       <div class="composer">
