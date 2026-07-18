@@ -50,17 +50,18 @@ services:
     build: deploy/nym
     container_name: nc-nym-client
     restart: unless-stopped
+    # The nym-client only accepts ONE websocket client (the gateway) and needs
+    # to flush its reply-SURB store on shutdown, or it comes back with corrupt
+    # state that silently breaks receiving. So: no port-poking healthcheck
+    # (it tripped "duplicate connection" every interval), and a long stop grace
+    # so a redeploy lets it shut down cleanly instead of being killed mid-flush.
+    stop_grace_period: 60s
     volumes:
       - nym-client-data:/root/.nym
     expose:
       - "1977"
     networks:
       - noblechat_internal
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/1977'"]
-      interval: 15s
-      timeout: 5s
-      retries: 20
 
   mix-l0-0:
     image: noblechat:local
