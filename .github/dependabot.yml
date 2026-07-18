@@ -1,32 +1,49 @@
 version: 2
 updates:
+  # Root npm project. Major updates are pinned: the crypto core (@noble/*) must
+  # stay on the audited line, and any other major bump gets tested by hand.
+  # Patch and minor updates (including security fixes) still flow automatically.
   - package-ecosystem: npm
     directory: "/"
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
     labels: ["dependencies"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: "/clients/desktop"
     schedule:
       interval: weekly
     labels: ["dependencies"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: "/clients/mobile"
     schedule:
       interval: weekly
     labels: ["dependencies"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
-  - package-ecosystem: github-actions
-    directory: "/"
-    schedule:
-      interval: weekly
-    labels: ["dependencies", "ci"]
-
+  # Base image: pin the Node major, take patch and minor updates.
   - package-ecosystem: docker
     directory: "/"
     schedule:
       interval: weekly
     labels: ["dependencies"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # Workflow action versions: keep these current, majors are low risk here.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels: ["dependencies", "ci"]
