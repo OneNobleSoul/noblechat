@@ -105,6 +105,17 @@ input{font-family:var(--sans)}
 .menu-item.danger{color:var(--danger)}
 .menu-item.danger:hover{background:color-mix(in srgb,var(--danger) 14%,transparent)}
 
+/* presence dots + labels */
+.avatar{position:relative}
+.dot{position:absolute;right:-1px;bottom:-1px;width:11px;height:11px;border-radius:50%;border:2px solid var(--panel)}
+.dot.on{background:var(--ok)}
+.dot.off{background:var(--dim)}
+.contact.active .dot{border-color:var(--panel-2)}
+.presence{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line)}
+.presence.on{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 40%,var(--line))}
+.presence.off{color:var(--dim)}
+.presence:empty{display:none}
+
 /* contact row: unread badge, per-row menu, muted marker */
 .contact{position:relative}
 .contact .c-main{flex:1;min-width:0}

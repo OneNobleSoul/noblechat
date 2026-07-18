@@ -11,7 +11,8 @@ import {
 import { toB64, fromB64 } from "../../../packages/crypto/src/util.js";
 
 const $ = (s) => document.querySelector(s);
-const K = { token: "noblechat:token", user: "noblechat:user", dev: "noblechat:deviceId", id: "noblechat:id", bkey: "noblechat:bkey", contacts: "noblechat:contacts", prefs: "noblechat:prefs" };
+const K = { token: "noblechat:token", user: "noblechat:user", dev: "noblechat:deviceId", id: "noblechat:id", bkey: "noblechat:bkey", contacts: "noblechat:contacts", prefs: "noblechat:prefs", history: "noblechat:history" };
+const HISTORY_PER_CHAT = 300; // cap stored messages per conversation
 const GATE_HASH = "b34f7fb73eea21931199bcd983951029b3df3ef407a7e58d617cf03747014f1a";
 const GATE_OK = "noblechat:gate-ok";
 
@@ -23,6 +24,7 @@ const state = {
   seen: new Set(), version: null, maintenance: false, statusTimer: null, authMode: "login",
   transport: "internal", nymAddress: null,
   soundOn: true, muted: new Set(), blocked: new Set(), unread: new Map(),
+  presence: new Map(), presenceTimer: null, histTimer: null,
 };
 
 const ls = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* */ } }, del: (k) => { try { localStorage.removeItem(k); } catch { /* */ } } };
@@ -194,6 +196,7 @@ async function afterAuth() {
   loadPrefs();
   await loadMyBundle();
   loadContactsLocal();
+  await loadConvos();
   startApp();
   loadContactsFromBlob(); // async refresh from encrypted server backup
 }
@@ -212,6 +215,28 @@ function startApp() {
   $("#me-handle").textContent = state.user;
   setMobileView("list");
   connectWS(); wireUI(); renderContacts();
+  pollPresence(); if (!state.presenceTimer) state.presenceTimer = setInterval(pollPresence, 15000);
+}
+
+// ---- presence (online/offline) ----
+async function pollPresence() {
+  const handles = [...state.contacts.keys()];
+  if (!handles.length || !state.token) return;
+  try {
+    const r = await fetch(`/api/presence?token=${encodeURIComponent(state.token)}&handles=${encodeURIComponent(handles.join(","))}`);
+    if (!r.ok) return;
+    const { online } = await r.json();
+    let changed = false;
+    for (const h of handles) { const on = !!(online && online[h]); if (state.presence.get(h) !== on) { state.presence.set(h, on); changed = true; } }
+    if (changed) { renderContacts(); updateChatHeadPresence(); }
+  } catch { /* */ }
+}
+function updateChatHeadPresence() {
+  const el = $("#chat-presence"); if (!el) return;
+  if (!state.active) { el.textContent = ""; el.className = "presence"; return; }
+  const on = state.presence.get(state.active);
+  el.className = "presence " + (on ? "on" : "off");
+  el.textContent = on ? "online" : "offline";
 }
 
 // ---------- account bundle + contacts ----------
@@ -225,6 +250,29 @@ function saveContactsLocal() {
   const arr = [...state.contacts.entries()].map(([handle, cards]) => ({ handle, cards: cards.map(serializeCard) }));
   ls.set(K.contacts, JSON.stringify(arr));
 }
+// ---- conversation history (persisted locally, encrypted with the blob key) ----
+// Survives reloads. Stored only on this device; the server never sees it.
+async function saveConvos() {
+  if (!state.blobKey) return;
+  try {
+    const obj = {};
+    for (const [h, arr] of state.convos) obj[h] = arr.slice(-HISTORY_PER_CHAT);
+    ls.set(K.history, await encryptBlob(state.blobKey, obj));
+  } catch { /* */ }
+}
+function scheduleSaveConvos() { clearTimeout(state.histTimer); state.histTimer = setTimeout(saveConvos, 400); }
+async function loadConvos() {
+  if (!state.blobKey) return;
+  try {
+    const raw = ls.get(K.history);
+    if (!raw) return;
+    const obj = await decryptBlob(state.blobKey, raw);
+    for (const [h, arr] of Object.entries(obj)) {
+      if (Array.isArray(arr)) { state.convos.set(h, arr); for (const m of arr) if (m.id) state.seen.add(m.id); }
+    }
+  } catch { /* */ }
+}
+
 async function uploadContactsBlob() {
   if (!state.blobKey || !state.token) return;
   try {
@@ -412,11 +460,13 @@ function pushMessage(handle, msg) {
   if (msg.id && arr.some((m) => m.id === msg.id)) return;
   arr.push(msg);
   if (state.active === handle) renderMessages();
+  scheduleSaveConvos();
 }
 function setActive(handle) {
   state.active = handle; $("#chat-empty").hidden = true; $("#chat-view").hidden = false; $("#chat-with").textContent = handle;
   clearUnread(handle);
-  renderContacts(); renderMessages(); setMobileView("chat");
+  renderContacts(); renderMessages(); updateChatHeadPresence(); setMobileView("chat");
+  pollPresence();
   const mi = $("#msg-input"); if (mi) mi.focus();
 }
 function bumpUnread(handle) { state.unread.set(handle, (state.unread.get(handle) || 0) + 1); renderContacts(); }
@@ -437,9 +487,11 @@ function renderContacts() {
       const unread = state.unread.get(h) || 0;
       const badge = unread ? `<span class="badge">${unread > 99 ? "99+" : unread}</span>` : "";
       const muteIcon = state.muted.has(h) ? `<span class="mini-icon" title="muted">🔕</span>` : "";
+      const on = state.presence.get(h);
+      const dot = `<span class="dot ${on ? "on" : "off"}" title="${on ? "online" : "offline"}"></span>`;
       return `<div class="contact ${h === state.active ? "active" : ""} ${unread ? "has-unread" : ""}" data-h="${esc(h)}">
-        <div class="avatar">${esc(h[0] || "?").toUpperCase()}</div>
-        <div class="c-main"><div class="h">${esc(h)} ${muteIcon}</div><div class="s">post-quantum · mixnet</div></div>
+        <div class="avatar">${esc(h[0] || "?").toUpperCase()}${dot}</div>
+        <div class="c-main"><div class="h">${esc(h)} ${muteIcon}</div><div class="s">${on ? "online" : "offline"}</div></div>
         ${badge}
         <button class="row-menu" data-menu="${esc(h)}" title="Options" aria-label="Options">⋮</button>
       </div>`;
@@ -472,19 +524,20 @@ function toggleMute(handle) {
 function deleteChat(handle) {
   state.convos.delete(handle); state.contacts.delete(handle); state.unread.delete(handle); state.muted.delete(handle);
   if (state.active === handle) { state.active = null; $("#chat-view").hidden = true; $("#chat-empty").hidden = false; setMobileView("list"); }
-  saveContactsLocal(); savePrefs(); uploadContactsBlob(); renderContacts();
+  saveContactsLocal(); savePrefs(); uploadContactsBlob(); scheduleSaveConvos(); renderContacts();
   toast(`deleted chat with ${handle}`);
 }
 function clearMessages(handle) {
   state.convos.set(handle, []);
   if (state.active === handle) renderMessages();
+  scheduleSaveConvos();
   toast(`cleared messages with ${handle}`);
 }
 function block(handle) {
   state.blocked.add(handle);
   state.convos.delete(handle); state.contacts.delete(handle); state.unread.delete(handle); state.muted.delete(handle);
   if (state.active === handle) { state.active = null; $("#chat-view").hidden = true; $("#chat-empty").hidden = false; setMobileView("list"); }
-  saveContactsLocal(); savePrefs(); uploadContactsBlob(); renderContacts();
+  saveContactsLocal(); savePrefs(); uploadContactsBlob(); scheduleSaveConvos(); renderContacts();
   toast(`blocked ${handle}`);
 }
 function unblock(handle) {
