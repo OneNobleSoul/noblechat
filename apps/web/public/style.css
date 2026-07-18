@@ -135,3 +135,19 @@ input{font-family:var(--sans)}
 /* make the [hidden] attribute reliable app-wide: author display rules
    (.setup/.app/.chat-view/.keygen ...) otherwise defeat it. */
 [hidden]{display:none!important}
+
+/* ---- announcements / maintenance / update (admin-driven) ---- */
+.nc-announce{position:fixed;top:0;left:0;right:0;z-index:45;background:linear-gradient(90deg,#0c2a26,#0d121b);
+  border-bottom:1px solid color-mix(in srgb,var(--accent) 35%,var(--line));color:var(--text);
+  font-size:13px;padding:9px 16px;text-align:center;font-family:var(--mono)}
+.nc-announce[hidden]{display:none!important}
+.nc-update{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:55;display:flex;gap:12px;align-items:center;
+  background:#0c111a;border:1px solid color-mix(in srgb,var(--accent) 45%,var(--line));border-radius:12px;
+  padding:10px 14px;font-size:13px;box-shadow:0 20px 50px -20px #000}
+.nc-update[hidden]{display:none!important}
+.nc-maint{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;padding:24px;
+  background:radial-gradient(circle at 50% 30%,rgba(251,191,36,.06),transparent 60%),rgba(4,6,10,.94);backdrop-filter:blur(8px)}
+.nc-maint[hidden]{display:none!important}
+.nc-maint-box{max-width:440px;text-align:center;background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:34px}
+.nc-maint-title{font-family:var(--mono);font-size:22px;color:var(--warn);margin-bottom:10px}
+.nc-maint-msg{color:var(--muted);font-size:14px;line-height:1.6}

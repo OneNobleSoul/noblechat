@@ -25,6 +25,7 @@ const state = {
   identity: null, contacts: new Map(), convos: new Map(),
   active: null, coverOn: true, coverTimer: null,
   netCols: [], stats: { sent: 0, cover: 0, recv: 0 },
+  version: null, maintenance: false, statusTimer: null,
 };
 
 function toast(msg) {
@@ -85,6 +86,8 @@ async function init() {
   state.net = makeBrowserNet(view);
   state.meanDelayMs = meanDelayMs;
   buildNetViz();
+  pollStatus(); // show maintenance / announcement even before login
+  if (!state.statusTimer) state.statusTimer = setInterval(pollStatus, 45000);
 
   let saved = null;
   try { saved = localStorage.getItem(ID_KEY); } catch {}
@@ -187,6 +190,7 @@ function connectWS() {
     let m; try { m = JSON.parse(ev.data); } catch { return; }
     if (m.t === "deliver") onDeliver(fromB64(m.envelope));
     else if (m.t === "hop") pulseHop(m.label);
+    else if (m.t === "status") applyStatus(m);
   });
   ws.addEventListener("close", () => setTimeout(connectWS, 1500));
 }
@@ -357,6 +361,47 @@ function wireUI() {
   cover.textContent = "cover: " + (state.coverOn ? "on" : "off");
   cover.classList.toggle("on", state.coverOn);
   updateStats();
+}
+
+// ---------- server status: announcements, maintenance, auto-update ----------
+function ensureEl(id, cls, parent) {
+  let el = document.getElementById(id);
+  if (!el) { el = document.createElement("div"); el.id = id; el.className = cls; (parent || document.body).appendChild(el); }
+  return el;
+}
+async function pollStatus() {
+  try { const r = await fetch("/api/status"); if (r.ok) applyStatus(await r.json()); } catch { /* offline */ }
+}
+function applyStatus(s) {
+  if (s.version) {
+    if (state.version && s.version !== state.version) offerUpdate();
+    else if (!state.version) state.version = s.version;
+  }
+  const ann = String(s.announcement || "").trim();
+  const banner = ensureEl("nc-announce", "nc-announce");
+  if (ann) { banner.textContent = "\u{1F4E2}  " + ann; banner.hidden = false; }
+  else banner.hidden = true;
+
+  state.maintenance = !!s.maintenance;
+  const mo = ensureEl("nc-maint", "nc-maint");
+  if (s.maintenance) {
+    mo.innerHTML = "";
+    const box = document.createElement("div"); box.className = "nc-maint-box";
+    const t = document.createElement("div"); t.className = "nc-maint-title"; t.textContent = "◆ Under maintenance";
+    const p = document.createElement("div"); p.className = "nc-maint-msg";
+    p.textContent = s.maintenanceMsg || "NobleChat is briefly undergoing maintenance. Please check back shortly.";
+    box.appendChild(t); box.appendChild(p); mo.appendChild(box); mo.hidden = false;
+  } else mo.hidden = true;
+}
+function offerUpdate() {
+  const input = $("#msg-input");
+  if (!input || !input.value.trim()) { location.reload(); return; } // auto-apply when idle
+  const bar = ensureEl("nc-update", "nc-update");
+  bar.innerHTML = "";
+  const span = document.createElement("span"); span.textContent = "A new version is available.";
+  const btn = document.createElement("button"); btn.className = "btn-sm"; btn.textContent = "Update";
+  btn.addEventListener("click", () => location.reload());
+  bar.appendChild(span); bar.appendChild(btn); bar.hidden = false;
 }
 
 boot();
