@@ -40,9 +40,26 @@ log "update: $local_sha -> $remote_sha, deploying"
 cd "$REPO_DIR"
 git fetch -q "$REMOTE_URL" "$BRANCH"
 git reset -q --hard FETCH_HEAD
-if docker compose up -d --build >>"$LOG" 2>&1; then
-  log "deploy ok, now at $(git rev-parse HEAD)"
-else
-  log "ERROR deploy failed; see docker output above"
+if ! docker compose up -d --build >>"$LOG" 2>&1; then
+  log "ERROR compose up failed; see docker output above"
   exit 1
 fi
+
+# A blanket recreate has, on occasion, left the gateway container "Created"
+# rather than running (brief 502). Verify it actually comes up healthy and, if
+# not, nudge it and retry a couple of times before giving up.
+gateway_ok() {
+  docker compose ps --format '{{.Service}} {{.State}}' 2>/dev/null | grep -q '^noblechat running' \
+    && docker exec noblechat node -e 'fetch("http://127.0.0.1:8790/healthz").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))' >/dev/null 2>&1
+}
+for attempt in 1 2 3; do
+  for _ in $(seq 1 12); do gateway_ok && break; sleep 5; done
+  if gateway_ok; then
+    log "deploy ok, now at $(git rev-parse HEAD)"
+    exit 0
+  fi
+  log "gateway not healthy after deploy (attempt $attempt), nudging with compose up -d"
+  docker compose up -d >>"$LOG" 2>&1
+done
+log "ERROR gateway did not become healthy after deploy; manual attention needed"
+exit 1
