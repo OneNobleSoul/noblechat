@@ -19,6 +19,7 @@ import { fromB64, toB64 } from "../../packages/crypto/src/util.js";
 import { openStore } from "./store.js";
 import { createLog } from "./log.js";
 import { isTransport, probeTcp } from "./transport.js";
+import { connectNym } from "./nym.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.resolve(__dirname, "../web/public");
@@ -132,7 +133,7 @@ async function main() {
   // Ops state for the admin panel: an in-memory event log plus a few counters.
   const elog = createLog();
   const startedAt = Date.now();
-  const counters = { submitted: 0, delivered: 0, registered: 0, logins: 0 };
+  const counters = { submitted: 0, delivered: 0, registered: 0, logins: 0, nymReceived: 0 };
   // If a previous run enabled nym and the sidecar is gone, fall back rather
   // than silently dropping every submit.
   if (live.transport === "nym" && !(CFG.nymClientUrl && (await probeTcp(CFG.nymClientUrl)))) {
@@ -140,9 +141,22 @@ async function main() {
     await store.setSetting("transport", "internal");
     elog.add("warn", "transport fallback", "nym sidecar unreachable at boot, using internal mixnet");
   }
+  // Long-lived link to the nym-client sidecar (if configured). Payloads that
+  // arrive over the public Nym network feed the exact same mailbox delivery
+  // path as the internal provider nodes.
+  const nym = CFG.nymClientUrl
+    ? connectNym(CFG.nymClientUrl, {
+        onPayload: (p, i) => { try { mix._deliver(fromB64(p), fromB64(i)); counters.delivered++; counters.nymReceived++; } catch { /* */ } },
+        onLog: (lvl, ev, det) => elog.add(lvl, ev, det),
+      })
+    : null;
 
   function broadcast(obj) { const s = JSON.stringify(obj); for (const ws of sockets) if (ws.readyState === 1) ws.send(s); }
-  function statusObj() { return { version: APP_VERSION, announcement: live.announcement, maintenance: live.maintenance, maintenanceMsg: live.maintenanceMsg, transport: live.transport }; }
+  function statusObj() {
+    const s = { version: APP_VERSION, announcement: live.announcement, maintenance: live.maintenance, maintenanceMsg: live.maintenanceMsg, transport: live.transport };
+    if (nym && nym.isConnected() && nym.getAddress()) s.nymAddress = nym.getAddress();
+    return s;
+  }
   function broadcastStatus() { broadcast({ t: "status", ...statusObj() }); }
   async function refreshBans() { bannedMbkeys.clear(); for (const k of await store.allBannedMbkeys()) bannedMbkeys.add(k); }
 
@@ -278,6 +292,8 @@ async function main() {
             connections: sockets.size,
             counters: { ...counters },
             nymConfigured: !!CFG.nymClientUrl,
+            nymConnected: !!(nym && nym.isConnected()),
+            nymAddress: (nym && nym.getAddress()) || null,
           });
         }
         if (url.pathname === "/api/admin/users" && req.method === "GET") {
@@ -310,7 +326,7 @@ async function main() {
             if (!isTransport(mode)) return json(res, 400, { error: "unknown transport" });
             if (mode === "nym") {
               if (!CFG.nymClientUrl) return json(res, 409, { error: "nym sidecar not configured (NYM_CLIENT_URL)" });
-              if (!(await probeTcp(CFG.nymClientUrl))) return json(res, 409, { error: "nym sidecar not reachable" });
+              if (!nym || !nym.isConnected() || !nym.getAddress()) return json(res, 409, { error: "nym sidecar not connected to the mixnet" });
             }
             if (mode !== live.transport) {
               live.transport = mode;
@@ -378,6 +394,7 @@ async function main() {
   function shutdown() {
     if (downFlag) return; downFlag = true;
     clearInterval(pruneTimer);
+    try { if (nym) nym.close(); } catch { /* */ }
     try { wss.close(); } catch { /* */ }
     for (const ws of sockets) { try { ws.close(1001, "server shutting down"); } catch { /* */ } }
     store.close().catch(() => {});
