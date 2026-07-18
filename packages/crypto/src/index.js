@@ -1,4 +1,4 @@
-// NobleChat crypto core — hybrid post-quantum primitives.
+// NobleChat crypto core - hybrid post-quantum primitives.
 export * from "./util.js";
 export * from "./kdf.js";
 export * from "./aead.js";

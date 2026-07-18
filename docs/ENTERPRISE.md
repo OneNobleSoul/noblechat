@@ -1,4 +1,4 @@
-# NobleChat — the honest road to an enterprise product
+# NobleChat - the honest road to an enterprise product
 
 This document is deliberately blunt. NobleChat today is a strong, working
 **prototype** of private messaging over a real mix network with hybrid
@@ -11,7 +11,7 @@ and a few of the remaining steps are things no amount of coding can shortcut.
 - Hybrid post-quantum key exchange (X25519 + ML-KEM-768) and hybrid signatures
   (Ed25519 + ML-DSA-65), using the audited `@noble` primitives.
 - A working Sphinx-style mix network (layered nodes + providers), Poisson
-  mixing, constant-size packets, and cover traffic — so the server cannot tell a
+  mixing, constant-size packets, and cover traffic - so the server cannot tell a
   real message from cover, nor a sender from a receiver by packet shape.
 - End-to-end encryption performed entirely in the client; the gateway only ever
   sees opaque, fixed-size onion packets and a mailbox id.
@@ -23,7 +23,7 @@ and a few of the remaining steps are things no amount of coding can shortcut.
 
 These are ordered by how much they gate a sale.
 
-### 1. Independent security audit (hard gate — do not sell without it)
+### 1. Independent security audit (hard gate - do not sell without it)
 The protocol composition (our Sphinx layer, the packet/mailbox format, the
 handshake, replay handling) is **custom and unaudited**. The individual crypto
 primitives are solid; the way we glue them together is what needs expert review.
@@ -38,7 +38,7 @@ server, compromised endpoint, traffic-analysis bounds of the mixnet at our size,
 metadata we do and do not reveal. Honesty here is a feature, not a weakness.
 
 ### 3. Backend hardening (currently prototype-grade)
-- The key directory and mailboxes are **in-memory** and single-process — they do
+- The key directory and mailboxes are **in-memory** and single-process - they do
   not survive a restart and do not scale. Needs durable storage, real mailbox
   queuing, and offline delivery so a message waits for a recipient who is away.
 - The mix network runs **in one process**. A real deployment wants independent
@@ -57,7 +57,7 @@ model.
 Group chats (MLS / RFC 9420 is the right target), file/attachment transfer,
 message history sync, read state, search, and mobile **push notifications**
 (which for iOS/Android means running notification infrastructure without leaking
-metadata — non-trivial for a metadata-minimising system).
+metadata - non-trivial for a metadata-minimising system).
 
 ### 6. Compliance & operations
 SOC 2 / ISO 27001 posture, data-processing agreements, an admin console,

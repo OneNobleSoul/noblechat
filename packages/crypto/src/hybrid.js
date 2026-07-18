@@ -2,7 +2,7 @@
 //
 // The session secret is derived from BOTH a classical X25519 Diffie-Hellman
 // AND an ML-KEM-768 encapsulation. It stays secure as long as *either* the
-// discrete-log assumption OR the Module-LWE assumption holds — so a future
+// discrete-log assumption OR the Module-LWE assumption holds - so a future
 // quantum computer that breaks X25519 does not break recorded messages.
 import { x25519 } from "@noble/curves/ed25519";
 import { ml_kem768 } from "@noble/post-quantum/ml-kem";

@@ -1,7 +1,7 @@
 // In-process mix network router.
 //
 // Each hop peels one Sphinx layer, waits an *exponentially distributed* delay
-// (Poisson mixing — no fixed batch an observer could time), then forwards to
+// (Poisson mixing - no fixed batch an observer could time), then forwards to
 // the next hop. The provider at the end delivers the inner payload to a mailbox.
 // The router itself can NOT tell real messages from cover traffic: every packet
 // is the same size and equally opaque.
@@ -16,7 +16,7 @@ function poissonDelay(meanMs) {
 // Default mailbox store: in-memory queue per mailbox. The gateway swaps in a
 // durable (Postgres-backed) store so ciphertext survives restarts and reaches
 // recipients who were offline. Interface: push(key, env), drain(key) -> env[]
-// (both may be sync or async — the router awaits either).
+// (both may be sync or async - the router awaits either).
 function memMailboxStore() {
   const m = new Map();
   return {
@@ -55,7 +55,7 @@ export class Mixnet {
     try {
       inner = unpackInner(payload);
     } catch {
-      return; // malformed / cover that didn't parse — silently drop
+      return; // malformed / cover that didn't parse - silently drop
     }
     const k = this._key(providerId, inner.mailbox);
     this.stats.delivered++;

@@ -10,7 +10,7 @@ async function api(path, method = "GET", body) {
   return res.json().catch(() => ({}));
 }
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
-function fmtTime(ms) { try { return new Date(Number(ms)).toLocaleString(); } catch { return "—"; } }
+function fmtTime(ms) { try { return new Date(Number(ms)).toLocaleString(); } catch { return "-"; } }
 function showDash(on) { $("#login").classList.toggle("hidden", on); $("#dash").classList.toggle("hidden", !on); }
 
 async function signIn(t) {
@@ -24,7 +24,7 @@ async function signIn(t) {
 function signOut() { sessionStorage.removeItem(TOKEN_KEY); token = ""; showDash(false); }
 
 function renderStatus(s) {
-  $("#ver").textContent = "version " + (s.version || "—");
+  $("#ver").textContent = "version " + (s.version || "-");
   $("#s-users").textContent = s.users ?? 0;
   $("#s-queued").textContent = s.queued ?? 0;
   $("#s-banned").textContent = s.banned ?? 0;
@@ -65,7 +65,7 @@ async function loadUsers() {
   }
 }
 async function act(kind, handle) {
-  if (kind === "ban") { const reason = prompt("Ban " + handle + " — reason (optional):", ""); if (reason === null) return; await api("/api/admin/ban", "POST", { handle, reason }); }
+  if (kind === "ban") { const reason = prompt("Ban " + handle + " - reason (optional):", ""); if (reason === null) return; await api("/api/admin/ban", "POST", { handle, reason }); }
   else if (kind === "delete") { if (!confirm("Delete account " + handle + "? Removes all its devices and queued messages.")) return; await api("/api/admin/delete", "POST", { handle }); }
   else if (kind === "unban") { await api("/api/admin/unban", "POST", { handle }); }
   await refresh();

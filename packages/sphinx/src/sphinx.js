@@ -1,4 +1,4 @@
-// NobleSphinx — a Sphinx-style mix packet with real key blinding.
+// NobleSphinx - a Sphinx-style mix packet with real key blinding.
 //
 // Every packet is the SAME fixed size. It is wrapped in one encryption layer
 // per mix hop; each hop peels exactly one layer, learns ONLY the next hop, and
@@ -6,7 +6,7 @@
 // (bitwise unlinkability). Built on Ristretto255 (prime-order group) so the
 // blinding arithmetic is exact.
 //
-// Faithful to Danezis–Goldberg Sphinx (header + filler + payload onion).
+// Faithful to Danezis-Goldberg Sphinx (header + filler + payload onion).
 import { RistrettoPoint, ed25519 } from "@noble/curves/ed25519";
 import { chacha20 } from "@noble/ciphers/chacha";
 import { hmac } from "@noble/hashes/hmac";

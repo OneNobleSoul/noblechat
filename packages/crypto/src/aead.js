@@ -18,7 +18,7 @@ export function open(key, sealed, aad) {
   return xchacha20poly1305(key, nonce, aad).decrypt(ct);
 }
 
-// Deterministic variant (caller supplies nonce) — used by the Sphinx layer
+// Deterministic variant (caller supplies nonce) - used by the Sphinx layer
 // where a fresh symmetric key per packet makes a zero nonce safe.
 export function sealWithNonce(key, nonce, plaintext, aad) {
   return xchacha20poly1305(key, nonce, aad).encrypt(plaintext);

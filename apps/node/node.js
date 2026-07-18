@@ -31,7 +31,7 @@ if (!self) { console.error("mix node: unknown NODE_LABEL", CFG.label); process.e
 const poisson = (m) => -m * Math.log(1 - Math.random());
 async function post(url, body) {
   try { await fetch(url, { method: "POST", headers: { "content-type": "application/json", "x-internal": CFG.token }, body: JSON.stringify(body) }); }
-  catch { /* drop on failure — a dropped packet is indistinguishable from cover */ }
+  catch { /* drop on failure - a dropped packet is indistinguishable from cover */ }
 }
 
 function handlePacket(pktObj) {

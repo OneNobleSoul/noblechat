@@ -313,7 +313,7 @@ function updateStats() { $("#stat-sent").textContent = state.stats.sent; $("#sta
 function toggleCover() {
   state.coverOn = !state.coverOn;
   const b = $("#cover-toggle"); b.textContent = "cover: " + (state.coverOn ? "on" : "off"); b.classList.toggle("on", state.coverOn);
-  if (state.coverOn) { toast("cover traffic on — hiding when you talk"); scheduleCover(); } else clearTimeout(state.coverTimer);
+  if (state.coverOn) { toast("cover traffic on - hiding when you talk"); scheduleCover(); } else clearTimeout(state.coverTimer);
 }
 function scheduleCover() { clearTimeout(state.coverTimer); state.coverTimer = setTimeout(() => { sendCover(); if (state.coverOn) scheduleCover(); }, poisson(3500) + 800); }
 function sendCover() { if (!state.ws || state.ws.readyState !== 1) return; try { const { firstNodeId, packet } = buildCoverLoop(state.net, state.identity); state.ws.send(JSON.stringify({ t: "submit", node: toB64(firstNodeId), packet: serializePacket(packet) })); state.stats.cover++; updateStats(); } catch { /* */ } }

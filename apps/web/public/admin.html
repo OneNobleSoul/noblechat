@@ -54,7 +54,7 @@ th{color:var(--dim);font-family:var(--mono);font-size:11px;text-transform:upperc
 
   <div id="dash" class="hidden">
     <div class="row" style="justify-content:space-between;align-items:flex-end">
-      <div><h1>◆ NobleChat Admin</h1><p class="sub" id="ver">—</p></div>
+      <div><h1>◆ NobleChat Admin</h1><p class="sub" id="ver">-</p></div>
       <div class="tools"><button id="refresh" class="btn ghost">Refresh</button><button id="logout" class="btn ghost">Sign out</button></div>
     </div>
 
@@ -64,7 +64,7 @@ th{color:var(--dim);font-family:var(--mono);font-size:11px;text-transform:upperc
         <div class="stat"><b id="s-users">0</b><span>users</span></div>
         <div class="stat"><b id="s-queued">0</b><span>queued msgs</span></div>
         <div class="stat"><b id="s-banned">0</b><span>banned</span></div>
-        <div class="stat"><b id="s-maint">—</b><span>maintenance</span></div>
+        <div class="stat"><b id="s-maint">-</b><span>maintenance</span></div>
       </div>
     </div>
 
@@ -76,7 +76,7 @@ th{color:var(--dim);font-family:var(--mono);font-size:11px;text-transform:upperc
 
     <div class="card">
       <h2>Maintenance mode</h2>
-      <div class="row" style="margin-bottom:12px"><span>Status:</span> <span id="maint-pill" class="pill">—</span></div>
+      <div class="row" style="margin-bottom:12px"><span>Status:</span> <span id="maint-pill" class="pill">-</span></div>
       <label>Maintenance message (optional)</label>
       <input id="maint-msg" placeholder="We'll be right back…">
       <div class="row"><button id="maint-on" class="btn warn">Enable maintenance</button><button id="maint-off" class="btn ghost">Disable</button></div>
