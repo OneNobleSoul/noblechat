@@ -33,7 +33,7 @@ export function parseNymPayload(text, maxBytes = 256 * 1024) {
 
 // Maintains a websocket to the sidecar with reconnect + backoff. `onPayload`
 // gets (providerIdB64, innerB64) for every valid incoming mixnet message.
-export function connectNym(url, { onPayload = () => {}, onLog = () => {} } = {}) {
+export function connectNym(url, { onPayload = () => {}, onLog = () => {}, onConnect = () => {}, onDisconnect = () => {} } = {}) {
   let ws = null;
   let address = null;
   let connected = false;
@@ -52,7 +52,7 @@ export function connectNym(url, { onPayload = () => {}, onLog = () => {} } = {})
       try { m = JSON.parse(raw.toString()); } catch { return; }
       if (m.type === "selfAddress" && typeof m.address === "string") {
         address = m.address;
-        if (!connected) { connected = true; onLog("info", "nym sidecar connected", address.slice(0, 24) + "..."); }
+        if (!connected) { connected = true; onLog("info", "nym sidecar connected", address.slice(0, 24) + "..."); onConnect(address); }
         return;
       }
       if (m.type === "received" && typeof m.message === "string") {
@@ -61,7 +61,7 @@ export function connectNym(url, { onPayload = () => {}, onLog = () => {} } = {})
       }
     });
     const down = () => {
-      if (connected) onLog("warn", "nym sidecar disconnected");
+      if (connected) { onLog("warn", "nym sidecar disconnected"); onDisconnect(); }
       connected = false; address = null;
       if (closed) return;
       setTimeout(open, backoff);
