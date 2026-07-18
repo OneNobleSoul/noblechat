@@ -13,8 +13,19 @@ import WebSocket from "ws";
 
 export function parseNymPayload(text, maxBytes = 256 * 1024) {
   if (typeof text !== "string" || text.length > maxBytes) return null;
-  let m;
-  try { m = JSON.parse(text); } catch { return null; }
+  // The browser SDK (@nymproject/sdk) frames a sent message with a small binary
+  // length prefix and a `{"mimeType":...,"headers":...}` envelope, so the raw
+  // string that arrives at the native sidecar looks like
+  //   <prefix>{"mimeType":"application/json","headers":null}{"v":1,"p":...,"i":...}
+  // A raw JSON.parse of the whole thing fails. The native client (and our own
+  // tests) send the payload unwrapped. Handle both: try a direct parse first,
+  // then fall back to the trailing {"v":...} object, which is our payload.
+  let m = null;
+  try { m = JSON.parse(text); } catch { m = null; }
+  if (!m || m.v !== 1) {
+    const idx = text.lastIndexOf('{"v":');
+    if (idx >= 0) { try { m = JSON.parse(text.slice(idx)); } catch { m = null; } }
+  }
   if (!m || m.v !== 1 || typeof m.p !== "string" || typeof m.i !== "string") return null;
   if (!/^[A-Za-z0-9+/=]{1,128}$/.test(m.p) || !/^[A-Za-z0-9+/=]{1,262144}$/.test(m.i)) return null;
   return { providerId: m.p, inner: m.i };
