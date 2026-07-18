@@ -56,16 +56,21 @@ function renderStatus(s) {
 }
 function renderTransport(s) {
   const mode = s.transport || "internal";
+  const desired = s.desiredTransport || mode;
+  const pending = desired === "nym" && mode !== "nym";
   const pill = $("#tr-pill");
-  pill.textContent = mode === "nym" ? "nym mixnet" : "internal mixnet";
+  pill.textContent = pending ? "nym pending" : (mode === "nym" ? "nym mixnet" : "internal mixnet");
   pill.className = "pill " + (mode === "nym" ? "on" : "ok");
-  $("#tr-internal").classList.toggle("active", mode === "internal");
-  $("#tr-nym").classList.toggle("active", mode === "nym");
+  // Reflect the chosen (desired) transport on the buttons, not just the active
+  // one, so a pending nym still shows as selected.
+  $("#tr-internal").classList.toggle("active", desired === "internal");
+  $("#tr-nym").classList.toggle("active", desired === "nym");
   const nymOk = !!s.nymConfigured;
   const nymConn = !!s.nymConnected;
-  $("#tr-nym").disabled = !nymConn && mode !== "nym";
+  $("#tr-nym").disabled = !nymConn && desired !== "nym";
   let note = "";
   if (!nymOk) note = "(sidecar not configured)";
+  else if (pending) note = "waiting for sidecar, will resume nym automatically…";
   else if (!nymConn) note = "(sidecar configured, connecting…)";
   else if (s.nymAddress) note = "connected · " + s.nymAddress.slice(0, 18) + "…";
   $("#tr-nym-state").textContent = note;

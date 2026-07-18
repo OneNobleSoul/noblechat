@@ -140,12 +140,16 @@ async function main() {
   const elog = createLog();
   const startedAt = Date.now();
   const counters = { submitted: 0, delivered: 0, registered: 0, logins: 0, nymReceived: 0 };
-  // If a previous run enabled nym and the sidecar is gone, fall back rather
-  // than silently dropping every submit.
-  if (live.transport === "nym" && !(CFG.nymClientUrl && (await probeTcp(CFG.nymClientUrl)))) {
-    live.transport = "internal";
-    await store.setSetting("transport", "internal");
-    elog.add("warn", "transport fallback", "nym sidecar unreachable at boot, using internal mixnet");
+  // `desiredTransport` is what the admin last chose (persisted). `live.transport`
+  // is what is actually in effect right now and what clients are told to use.
+  // They differ only when nym is desired but the sidecar is not connected: we
+  // serve on internal meanwhile and flip back to nym automatically once the
+  // sidecar reconnects (e.g. after a redeploy), so no manual re-toggle is needed
+  // and no message is ever sent into a dead nym uplink.
+  let desiredTransport = live.transport;
+  if (desiredTransport === "nym") {
+    live.transport = "internal"; // start safe; the sidecar's onConnect flips it back
+    elog.add("info", "transport pending", "nym desired, waiting for sidecar to connect");
   }
   // Long-lived link to the nym-client sidecar (if configured). Payloads that
   // arrive over the public Nym network feed the exact same mailbox delivery
@@ -154,6 +158,20 @@ async function main() {
     ? connectNym(CFG.nymClientUrl, {
         onPayload: (p, i) => { try { mix._deliver(fromB64(p), fromB64(i)); counters.delivered++; counters.nymReceived++; } catch { /* */ } },
         onLog: (lvl, ev, det) => elog.add(lvl, ev, det),
+        onConnect: () => {
+          if (desiredTransport === "nym" && live.transport !== "nym") {
+            live.transport = "nym";
+            elog.add("info", "transport restored", "nym sidecar connected, switching back to nym");
+            broadcastStatus();
+          }
+        },
+        onDisconnect: () => {
+          if (live.transport === "nym") {
+            live.transport = "internal";
+            elog.add("warn", "transport auto-fallback", "nym sidecar dropped, serving internal until it returns");
+            broadcastStatus();
+          }
+        },
       })
     : null;
 
@@ -324,6 +342,7 @@ async function main() {
             nymConfigured: !!CFG.nymClientUrl,
             nymConnected: !!(nym && nym.isConnected()),
             nymAddress: (nym && nym.getAddress()) || null,
+            desiredTransport,
           });
         }
         if (url.pathname === "/api/admin/users" && req.method === "GET") {
@@ -358,9 +377,10 @@ async function main() {
               if (!CFG.nymClientUrl) return json(res, 409, { error: "nym sidecar not configured (NYM_CLIENT_URL)" });
               if (!nym || !nym.isConnected() || !nym.getAddress()) return json(res, 409, { error: "nym sidecar not connected to the mixnet" });
             }
+            desiredTransport = mode;
+            await store.setSetting("transport", mode);
             if (mode !== live.transport) {
               live.transport = mode;
-              await store.setSetting("transport", mode);
               elog.add("warn", "transport switched", mode);
               broadcastStatus();
             }
