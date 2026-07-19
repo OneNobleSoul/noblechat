@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wie NobleChat funktioniert</title>
+<meta name="description" content="Einfach erklärt: wie NobleChat deine Nachrichten schützt.">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◆</text></svg>">
+<style>
+:root{--bg:#06080c;--panel:#0d121b;--panel-2:#111a26;--line:#1c2634;--text:#dbe4ee;--muted:#8695a8;--dim:#5c6a7d;--accent:#5eead4;--accent-2:#38bdf8;--warn:#fbbf24;--danger:#fb7185;--mono:"JetBrains Mono",ui-monospace,Menlo,monospace;--sans:"Inter",system-ui,sans-serif}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:var(--accent)}
+.bg-grid{position:fixed;inset:0;z-index:-1;opacity:.18;background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);background-size:48px 48px;mask-image:radial-gradient(circle at 50% -10%,#000,transparent 70%)}
+.wrap{max-width:760px;margin:0 auto;padding:0 20px 80px}
+.top{display:flex;align-items:center;justify-content:space-between;padding:22px 0}
+.brand{font-family:var(--mono);font-weight:700;font-size:19px}
+.brand::first-letter{color:var(--accent)}
+.back{font-family:var(--mono);font-size:13px;color:var(--muted);text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:7px 14px}
+.back:hover{color:var(--text);border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
+.hero{text-align:center;padding:30px 0 10px}
+.hero .mark{font-size:52px;color:var(--accent);animation:float 4s ease-in-out infinite}
+@keyframes float{50%{transform:translateY(-8px)}}
+.hero h1{font-size:32px;margin:14px 0 8px;letter-spacing:-.5px}
+.hero p{color:var(--muted);max-width:52ch;margin:0 auto;font-size:16px}
+.tldr{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin:28px 0;font-size:15px}
+.tldr b{color:var(--accent)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:24px;margin:20px 0}
+.card h2{font-size:20px;margin:0 0 6px;display:flex;align-items:center;gap:10px}
+.card h2 .n{font-family:var(--mono);font-size:12px;color:var(--dim);border:1px solid var(--line);border-radius:8px;padding:3px 8px}
+.card p{margin:8px 0 0;color:var(--text)}
+.card p.sub{color:var(--muted);font-size:14.5px}
+.stage{margin:18px 0 4px;background:#080b11;border:1px solid var(--line);border-radius:12px;padding:20px;overflow:hidden}
+/* E2E lock animation */
+.e2e{display:flex;align-items:center;justify-content:space-between;gap:8px;font-family:var(--mono);font-size:13px}
+.e2e .who{text-align:center;color:var(--muted)}
+.e2e .who .big{font-size:26px}
+.e2e .pipe{flex:1;position:relative;height:34px;margin:0 6px}
+.e2e .pkt{position:absolute;top:7px;left:0;background:var(--accent);color:#04120f;border-radius:6px;padding:2px 7px;font-weight:700;white-space:nowrap;animation:travel 4s linear infinite}
+.e2e .scramble{position:absolute;top:9px;left:50%;transform:translateX(-50%);color:var(--dim)}
+@keyframes travel{0%{left:0;opacity:0}10%{opacity:1}44%{left:calc(50% - 26px);background:var(--accent);color:#04120f}52%{background:var(--dim);color:#0a0e15}90%{opacity:1}92%{left:calc(100% - 26px)}100%{left:calc(100% - 26px);opacity:0}}
+.lockrow{display:flex;justify-content:center;gap:26px;margin-top:12px;font-size:12px;color:var(--dim);font-family:var(--mono)}
+/* mixnet hop animation */
+.mix{display:flex;align-items:center;justify-content:space-between;position:relative}
+.mix .node{width:46px;height:46px;border-radius:10px;border:1px solid var(--line);background:#0a0e15;display:grid;place-items:center;font-size:18px;color:var(--dim);position:relative;z-index:1}
+.mix .lbl{position:absolute;top:52px;left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:9px;color:var(--dim);white-space:nowrap}
+.mix .seg{flex:1;height:2px;background:var(--line);margin:0 4px;position:relative}
+.mix .dot{position:absolute;top:calc(50% - 5px);left:0;width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px 2px var(--accent);animation:hop 5s ease-in-out infinite}
+@keyframes hop{0%{left:6%;opacity:0}6%{opacity:1}22%{left:28%}44%{left:50%}66%{left:72%}88%{left:94%}94%{opacity:1}100%{left:94%;opacity:0}}
+.node.pulse-1{animation:np 5s infinite}.node.pulse-2{animation:np 5s infinite .9s}.node.pulse-3{animation:np 5s infinite 1.9s}.node.pulse-4{animation:np 5s infinite 3s}
+@keyframes np{0%,60%,100%{border-color:var(--line);color:var(--dim);box-shadow:none}12%,20%{border-color:var(--accent);color:var(--accent);box-shadow:0 0 14px -2px var(--accent)}}
+/* cover traffic */
+.cover{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
+.cover .c{width:22px;height:22px;border-radius:5px;background:var(--panel-2);border:1px solid var(--line);animation:blink 2.4s infinite}
+.cover .c.real{background:var(--accent)}
+.cover .c:nth-child(2n){animation-delay:.4s}.cover .c:nth-child(3n){animation-delay:.9s}.cover .c:nth-child(5n){animation-delay:1.4s}
+@keyframes blink{0%,100%{opacity:.35}50%{opacity:1}}
+/* offline mailbox */
+.mbox{display:flex;align-items:center;justify-content:center;gap:14px;font-family:var(--mono);font-size:13px;color:var(--muted)}
+.mbox-icon{font-size:30px;animation:float 3s ease-in-out infinite}
+.feat{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:12px}
+.feat .f{background:#080b11;border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:13.5px}
+.feat .f b{display:block;color:var(--accent);font-family:var(--mono);font-size:12px;margin-bottom:2px}
+.foot{text-align:center;color:var(--dim);font-size:13px;margin-top:36px;line-height:1.7}
+.cta{display:inline-block;margin-top:8px;background:linear-gradient(180deg,var(--accent),#2dd4bf);color:#04120f;font-weight:600;text-decoration:none;padding:11px 22px;border-radius:10px}
+@media(prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+</head>
+<body>
+<div class="bg-grid" aria-hidden="true"></div>
+<div class="wrap">
+  <div class="top">
+    <span class="brand">◆ NobleChat</span>
+    <a class="back" href="/">← zurück zum Chat</a>
+  </div>
+
+  <div class="hero">
+    <div class="mark">◆</div>
+    <h1>Wie funktioniert NobleChat?</h1>
+    <p>Ganz einfach erklärt. Du brauchst nichts von Technik zu verstehen. Hier siehst du, warum deine Nachrichten hier sicher sind.</p>
+  </div>
+
+  <div class="tldr">
+    <b>Kurz gesagt:</b> Niemand außer dir und der Person, mit der du schreibst, kann eure Nachrichten lesen. Nicht mal wir, die den Dienst betreiben. Und niemand kann sehen, wer mit wem redet.
+  </div>
+
+  <div class="card">
+    <h2><span class="n">1</span> Nur ihr zwei könnt mitlesen</h2>
+    <p class="sub">Das nennt man Ende-zu-Ende-Verschlüsselung. Deine Nachricht wird auf deinem Handy in einen Geheimcode verwandelt und erst auf dem Gerät des Empfängers wieder lesbar. Auf dem ganzen Weg dazwischen ist sie nur unlesbarer Buchstabensalat.</p>
+    <div class="stage">
+      <div class="e2e">
+        <div class="who"><div class="big">🧑</div>du</div>
+        <div class="pipe"><span class="pkt">hallo</span><span class="scramble">nur der Server sieht: x9$#kQ</span></div>
+        <div class="who"><div class="big">🧑</div>freund</div>
+      </div>
+      <div class="lockrow"><span>🔒 verschlüsselt bei dir</span><span>🔓 entschlüsselt beim Empfänger</span></div>
+    </div>
+    <p class="sub">Der Schlüssel dafür wird auf deinem Gerät erzeugt und verlässt es nie. Wir speichern ihn nirgends.</p>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">2</span> Sicher auch gegen Computer von morgen</h2>
+    <p class="sub">Die Verschlüsselung nutzt zusätzlich moderne "post-quantum" Verfahren. Das heißt: Selbst wenn jemand die Nachrichten heute mitschneidet und in vielen Jahren mit einem Quantencomputer knacken will, kommt er nicht rein. Vorsorge für die Zukunft.</p>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">3</span> Niemand sieht, wer mit wem redet</h2>
+    <p class="sub">Normale Messenger verraten dem Server zumindest, wer wann mit wem schreibt. NobleChat schickt jede Nachricht über mehrere Zwischenstationen (ein "Mixnetz"). Jede Station kennt nur die nächste, keine kennt den ganzen Weg. So kann niemand die Verbindung zwischen dir und deinem Kontakt nachverfolgen.</p>
+    <div class="stage">
+      <div class="mix">
+        <div class="node pulse-1">🧑<span class="lbl">du</span></div>
+        <div class="seg"><span class="dot"></span></div>
+        <div class="node pulse-2">◆<span class="lbl">Station 1</span></div>
+        <div class="seg"></div>
+        <div class="node pulse-3">◆<span class="lbl">Station 2</span></div>
+        <div class="seg"></div>
+        <div class="node pulse-4">🧑<span class="lbl">freund</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">4</span> Getarnt im Rauschen</h2>
+    <p class="sub">Dein Gerät sendet ständig auch leere Schein-Pakete mit, die genauso aussehen wie echte. Für einen Beobachter ist nicht erkennbar, wann du wirklich etwas schreibst und wann nicht. Ein echtes Paket versteckt sich einfach im Rauschen der vielen.</p>
+    <div class="stage">
+      <div class="cover">
+        <span class="c"></span><span class="c"></span><span class="c real"></span><span class="c"></span><span class="c"></span><span class="c"></span><span class="c"></span><span class="c"></span><span class="c real"></span><span class="c"></span><span class="c"></span><span class="c"></span><span class="c"></span><span class="c"></span><span class="c"></span><span class="c"></span>
+      </div>
+      <div class="lockrow" style="margin-top:14px"><span style="color:var(--accent)">■ echte Nachricht</span><span>■ Tarn-Paket</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">5</span> Erreichbar, auch wenn gerade offline</h2>
+    <p class="sub">Ist dein Kontakt gerade nicht online, geht die Nachricht nicht verloren. Sie wartet verschlüsselt in einem digitalen Briefkasten und wird zugestellt, sobald das andere Gerät wieder da ist. Der Server sieht dabei nur den verschlüsselten Umschlag, nie den Inhalt.</p>
+    <div class="stage">
+      <div class="mbox"><span class="mbox-icon">📬</span><span>verschlüsselte Nachricht wartet, bis der Empfänger wieder online ist</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">6</span> Noch anonymer: das öffentliche Nym-Netz</h2>
+    <p class="sub">Unten links kannst du sehen, über welches Netz gerade geroutet wird. Im Nym-Modus laufen deine Pakete durch das weltweite öffentliche Nym-Mixnetz und mischen sich mit dem Verkehr vieler anderer Menschen. Dann sind Absender, Zeitpunkt und Weg sogar vor unserem eigenen Server verborgen.</p>
+    <div class="feat">
+      <div class="f"><b>internal</b>Unser eigenes Mixnetz. Schnell, gute Basis-Anonymität.</div>
+      <div class="f"><b>public nym</b>Öffentliches Nym-Netz. Stärkste Anonymität, etwas langsamer.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">7</span> Was du damit machst</h2>
+    <div class="feat">
+      <div class="f"><b>1:1 & Gruppen</b>Einzel- und Gruppenchats, alles verschlüsselt.</div>
+      <div class="f"><b>Bilder & Dateien</b>Verschlüsselt teilen, Bilder mit Selbstlösch-Timer.</div>
+      <div class="f"><b>Reagieren & antworten</b>Emojis, Zitate, Nachrichten löschen.</div>
+      <div class="f"><b>Anrufe</b>Sprach- und Videoanrufe, direkt zwischen euch.</div>
+    </div>
+  </div>
+
+  <div class="foot">
+    NobleChat ist ein laufendes Projekt und noch nicht unabhängig geprüft.<br>Verlass dich damit noch nicht auf den Schutz echter Geheimnisse.
+    <br><a class="cta" href="/">Los geht's →</a>
+  </div>
+</div>
+</body>
+</html>
