@@ -492,7 +492,7 @@ async function sendMessage() {
   if (!body || !state.active) return;
   const extra = {};
   if (state.replyingTo) extra.replyTo = state.replyingTo;
-  if (await deliverContent(state.active, body)) { input.value = ""; clearReply(); }
+  if (await deliverContent(state.active, body, extra)) { input.value = ""; clearReply(); }
 }
 
 // ---------- per-message actions: react, reply, delete ----------
