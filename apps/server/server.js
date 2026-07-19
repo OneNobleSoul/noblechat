@@ -224,16 +224,20 @@ async function main() {
     let rel = req.url.split("?")[0]; if (rel === "/") rel = "/index.html";
     const file = path.join(PUBLIC, path.normalize(rel).replace(/^(\.\.[/\\])+/, ""));
     if (!file.startsWith(PUBLIC)) { res.writeHead(403).end(); return; }
+    const base = path.basename(file);
     const isHtml = file.endsWith("index.html");
+    // The HTML and the service-worker scripts must always revalidate so an
+    // update actually reaches clients; hash-versioned assets stay cacheable.
+    const noCache = isHtml || base === "sw.js" || base === "register-sw.js";
     fs.readFile(file, (err, data) => {
       if (err) { res.writeHead(404).end("not found"); return; }
       const headers = { "content-type": MIME[path.extname(file)] || "application/octet-stream" };
       if (isHtml) {
-        // Stamp the asset URLs with the current build version and never cache the
-        // HTML itself, so a new build always loads fresh CSS/JS.
+        // Stamp the asset URLs with the current build version so a new build
+        // always loads fresh CSS/JS.
         data = Buffer.from(data.toString("utf8").replace(/__V__/g, APP_VERSION));
-        headers["Cache-Control"] = "no-cache";
       }
+      if (noCache) headers["Cache-Control"] = "no-cache";
       res.writeHead(200, headers);
       res.end(data);
     });
