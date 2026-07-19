@@ -125,10 +125,11 @@ input{font-family:var(--sans)}
 .composer input{flex:1;min-width:0;background:#080b11;border:1px solid var(--line);border-radius:12px;color:var(--text);padding:12px 14px;font-size:14.5px}
 .emoji-wrap{position:relative;display:flex;align-items:center}
 #emoji-btn{font-size:22px}
-.emoji-pop{position:absolute;bottom:calc(100% + 8px);left:0;z-index:70;width:288px;max-height:220px;overflow-y:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px;box-shadow:0 24px 60px -24px #000;display:grid;grid-template-columns:repeat(8,1fr);gap:2px}
+.emoji-pop{position:absolute;bottom:calc(100% + 8px);left:0;z-index:70;width:min(340px,calc(100vw - 24px));max-height:260px;overflow-y:auto;overflow-x:hidden;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px;box-shadow:0 24px 60px -24px #000;display:grid;grid-template-columns:repeat(auto-fill,minmax(34px,1fr));gap:2px}
 .emoji-pop[hidden]{display:none!important}
-.emoji-pop .emoji{background:transparent;border:0;font-size:20px;line-height:1;padding:5px;border-radius:7px;cursor:pointer}
+.emoji-pop .emoji{background:transparent;border:0;font-size:21px;line-height:1;padding:4px 0;border-radius:7px;cursor:pointer;min-width:0;aspect-ratio:1/1;display:grid;place-items:center}
 .emoji-pop .emoji:hover{background:var(--panel-2)}
+.emoji-cat{grid-column:1/-1;font-family:var(--mono);font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:var(--dim);padding:8px 2px 2px}
 /* transport tag + dimmed mix diagram (shown over Nym) */
 .net-title{display:flex;align-items:center;justify-content:space-between}
 .net-transport{font-family:var(--mono);font-size:9.5px;letter-spacing:1px;color:var(--dim);border:1px solid var(--line);border-radius:999px;padding:2px 7px}
@@ -145,7 +146,11 @@ input{font-family:var(--sans)}
 .icon-btn:hover{color:var(--text);background:var(--panel)}
 .icon-btn.back{display:none;font-size:28px;margin-left:-4px}
 .chat-menu-wrap{margin-left:auto;position:relative}
-.menu-pop{position:absolute;right:0;top:calc(100% + 6px);z-index:70;min-width:178px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:6px;box-shadow:0 24px 60px -24px #000;display:flex;flex-direction:column;gap:2px}
+/* Popovers size to their content and never stretch to the screen edge. The
+   chat-header menu anchors to the right of its button; the JS-positioned ones
+   (message / row / expiry) set left explicitly and rely on width:max-content. */
+.menu-pop{position:absolute;z-index:70;width:max-content;min-width:172px;max-width:min(240px,calc(100vw - 16px));background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:6px;box-shadow:0 24px 60px -24px #000;display:flex;flex-direction:column;gap:2px}
+#chat-menu-pop{right:0;top:calc(100% + 6px)}
 .menu-pop[hidden]{display:none!important}
 .menu-item{display:flex;align-items:center;gap:8px;background:transparent;border:0;color:var(--text);font-family:var(--sans);font-size:13.5px;text-align:left;padding:9px 11px;border-radius:8px;cursor:pointer}
 .menu-item:hover{background:var(--panel-2)}
