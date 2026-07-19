@@ -96,7 +96,9 @@ input{font-family:var(--sans)}
 .att-cap{margin-top:6px}
 .msg.out .att-ph,.msg.out .att-file{background:rgba(0,0,0,.14)}
 .composer{display:flex;gap:10px;padding:14px max(20px,calc((100% - var(--chat-col))/2));border-top:1px solid var(--line)}
-.composer input{flex:1;background:#080b11;border:1px solid var(--line);border-radius:12px;color:var(--text);padding:12px 14px;font-size:14.5px}
+/* min-width:0 lets the input shrink below its intrinsic size so the composer
+   (emoji + attach + input + send) never overflows narrow phones. */
+.composer input{flex:1;min-width:0;background:#080b11;border:1px solid var(--line);border-radius:12px;color:var(--text);padding:12px 14px;font-size:14.5px}
 .emoji-wrap{position:relative;display:flex;align-items:center}
 #emoji-btn{font-size:22px}
 .emoji-pop{position:absolute;bottom:calc(100% + 8px);left:0;z-index:70;width:288px;max-height:220px;overflow-y:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px;box-shadow:0 24px 60px -24px #000;display:grid;grid-template-columns:repeat(8,1fr);gap:2px}
@@ -158,14 +160,19 @@ input{font-family:var(--sans)}
 .blocked-row .unblock{width:auto;padding:5px 10px;font-size:12px}
 
 @media(max-width:720px){
-  .app{grid-template-columns:1fr;grid-template-rows:52px 1fr}
-  .topbar{gap:10px;padding:0 12px}
+  /* minmax(0,1fr) (not 1fr) keeps the single column within the viewport instead
+     of growing to its content's min width, which was overflowing the whole app
+     to the right. Topbar spans that one column, not to a phantom second one. */
+  .app{grid-template-columns:minmax(0,1fr);grid-template-rows:52px 1fr}
+  .topbar{grid-column:1;gap:10px;padding:0 12px;min-width:0}
   .me,.hide-sm,.pill.secure{display:none}
   .top-right{gap:6px}
   .pill{padding:6px 10px}
+  .composer{gap:6px;padding-left:10px;padding-right:10px}
+  #emoji-btn,#attach-btn{font-size:20px;padding:4px 5px}
   /* one-pane-at-a-time: the sidebar is the list view, the chat overlays it */
-  .sidebar{grid-column:1;grid-row:2;border-right:0}
-  .chat{grid-column:1;grid-row:2}
+  .sidebar{grid-column:1;grid-row:2;border-right:0;min-width:0}
+  .chat{grid-column:1;grid-row:2;min-width:0}
   #app[data-view="chat"] .sidebar{display:none}
   #app[data-view="chat"] .chat{display:flex}
   #app[data-view="list"] .chat{display:none}
