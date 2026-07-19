@@ -40,29 +40,34 @@ log "update: $local_sha -> $remote_sha, deploying"
 cd "$REPO_DIR"
 git fetch -q "$REMOTE_URL" "$BRANCH"
 git reset -q --hard FETCH_HEAD
-if ! docker compose up -d --build >>"$LOG" 2>&1; then
-  log "ERROR compose up failed; see docker output above"
-  exit 1
-fi
-
-# The blanket recreate above sometimes leaves the gateway container "Created"
-# rather than running (the nym-client's long stop grace can stall the batch
-# start), causing a 502. A TARGETED `up -d noblechat` reliably starts it, so we
-# always run it and then verify health, nudging the same way (never the plain
-# `up -d`, which reproduces the stall) and retrying before giving up.
-docker compose up -d noblechat >>"$LOG" 2>&1 || true
 gateway_ok() {
-  docker compose ps --format '{{.Service}} {{.State}}' 2>/dev/null | grep -q '^noblechat running' \
+  docker inspect -f '{{.State.Running}}' noblechat 2>/dev/null | grep -q true \
     && docker exec noblechat node -e 'fetch("http://127.0.0.1:8790/healthz").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))' >/dev/null 2>&1
 }
-for attempt in 1 2 3; do
-  for _ in $(seq 1 12); do gateway_ok && break; sleep 5; done
-  if gateway_ok; then
-    log "deploy ok, now at $(git rev-parse HEAD)"
-    exit 0
-  fi
-  log "gateway not healthy after deploy (attempt $attempt), nudging with compose up -d noblechat"
-  docker compose up -d noblechat >>"$LOG" 2>&1
+
+# The previous blanket `docker compose up -d --build` recreated all 11 containers
+# at once; the nym-client's long stop grace could stall that batch and leave the
+# gateway "Created" (not running) -> 502. Deploy gateway-first instead:
+
+# 1. Build the image up front - no containers are touched, so no downtime.
+if ! docker compose build >>"$LOG" 2>&1; then
+  log "ERROR build failed; see docker output above"; exit 1
+fi
+
+# 2. Recreate ONLY the gateway with the new image and confirm it serves, so the
+#    site is back within seconds regardless of the slower node/sidecar churn.
+for attempt in 1 2 3 4 5; do
+  docker compose up -d --no-deps noblechat >>"$LOG" 2>&1 || true
+  for _ in $(seq 1 6); do gateway_ok && break; sleep 5; done
+  gateway_ok && break
+  log "gateway not up yet after targeted start (attempt $attempt)"
 done
-log "ERROR gateway did not become healthy after deploy; manual attention needed"
-exit 1
+if ! gateway_ok; then log "ERROR gateway did not come up; manual attention needed"; exit 1; fi
+
+# 3. Reconcile the rest (mix nodes, nym-client) now that the site already serves.
+#    The gateway already matches the desired state, so this won't recreate it; if
+#    the nym-client stop grace stalls here it no longer causes an outage.
+docker compose up -d >>"$LOG" 2>&1 || true
+gateway_ok || { docker compose up -d --no-deps noblechat >>"$LOG" 2>&1 || true; }
+log "deploy ok, now at $(git rev-parse HEAD)"
+exit 0
