@@ -84,6 +84,24 @@ a{color:var(--accent)}
 .swarm .legend{position:absolute;bottom:-2px;left:0;right:0;display:flex;justify-content:center;gap:20px;font-family:var(--mono);font-size:10.5px;color:var(--dim)}
 .swarm .legend .g1{color:var(--accent)}
 
+/* ---- NobleChat vs Tor comparison ---- */
+.vs{display:flex;flex-direction:column;gap:14px}
+.vs .dim{color:var(--dim);font-weight:400}
+.vs .lane{background:#0a0e15;border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.vs .lane h3{margin:0 0 2px;font-size:12.5px;font-family:var(--mono);display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.vs .tag{font-size:10px;padding:2px 9px;border-radius:999px;white-space:nowrap}
+.vs .tag.bad{color:var(--danger);border:1px solid color-mix(in srgb,var(--danger) 45%,var(--line))}
+.vs .tag.good{color:var(--ok);border:1px solid color-mix(in srgb,var(--ok) 45%,var(--line))}
+.vs .track{position:relative;height:38px;margin:6px 0 2px}
+.vs .eye{position:absolute;top:9px;font-size:15px;z-index:3}
+.vs .eye.a{left:0}.vs .eye.b{right:0}
+.vs .relay{position:absolute;top:14px;width:12px;height:12px;border-radius:4px;background:#0e1622;border:1px solid var(--line);transform:translateX(-50%)}
+.vs .d{position:absolute;top:15px;left:26px;width:11px;height:11px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px -1px var(--accent)}
+.vs .d.cover{background:#1b2636;border:1px solid #2a3a50;box-shadow:none}
+@keyframes torflow{0%{left:26px;opacity:0}6%{opacity:1}94%{opacity:1}100%{left:calc(100% - 30px);opacity:0}}
+@keyframes mixflow{0%{left:26px;opacity:0}6%{opacity:1}26%{left:24%}33%{left:24%}56%{left:48%}63%{left:48%}86%{left:72%}94%{opacity:1}100%{left:calc(100% - 30px);opacity:0}}
+.vs-note{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:4px}
+
 /* ---- cover traffic pulse grid ---- */
 .cover{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
 .cover .c{width:22px;height:22px;border-radius:5px;background:var(--panel-2);border:1px solid var(--line);animation:blink 2.4s infinite}
@@ -114,7 +132,7 @@ a{color:var(--accent)}
   <div class="hero">
     <div class="mark">◆</div>
     <h1>How NobleChat works</h1>
-    <p>Explained in plain English. You don't need to understand any of the tech. Here is why your messages are safe here.</p>
+    <p>NobleChat is built on one idea: your conversations belong to you alone. Not to us, not to the server, not to anyone watching the network. Here is how that actually works.</p>
   </div>
 
   <div class="tldr">
@@ -151,6 +169,34 @@ a{color:var(--accent)}
         <div class="ep friend">🧑<span class="lbl">friend</span></div>
         <span class="p real"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p real"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p real"></span><span class="p"></span>
         <div class="legend"><span class="g1">■ your real message</span><span>■ everyone's traffic, mixed together</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">vs</span> How this differs from Tor</h2>
+    <p class="sub">You may have heard of Tor. It also bounces your traffic through a few relays, so it hides a lot. But Tor is built for speed: it forwards each packet immediately, keeping its timing intact. A powerful observer who can watch both ends of the network can line up the timing at the entry and the exit and figure out that they belong together, which links you to your contact.</p>
+    <p class="sub">A mix network like NobleChat trades a little speed for much stronger anonymity. Each hop deliberately holds packets for a random moment, reorders them, and pads everything with cover traffic. The rhythm that goes in is not the rhythm that comes out, so even an observer watching the whole network cannot line the two ends up.</p>
+    <div class="stage">
+      <div class="vs">
+        <div class="lane tor">
+          <h3><span>🧅 Tor <span class="dim">· fast, timing preserved</span></span><span class="tag bad">ends can be correlated</span></h3>
+          <div class="track">
+            <span class="eye a">👁</span><span class="eye b">👁</span>
+            <span class="relay" style="left:26%"></span><span class="relay" style="left:50%"></span><span class="relay" style="left:74%"></span>
+            <span class="d" style="animation:torflow 3.4s linear 0s infinite"></span><span class="d" style="animation:torflow 3.4s linear 1.13s infinite"></span><span class="d" style="animation:torflow 3.4s linear 2.26s infinite"></span>
+          </div>
+          <div class="vs-note">Same evenly spaced rhythm at both ends → an observer links them.</div>
+        </div>
+        <div class="lane mix">
+          <h3><span>◆ NobleChat <span class="dim">· delayed, reordered, padded</span></span><span class="tag good">ends cannot be linked</span></h3>
+          <div class="track">
+            <span class="eye a">👁</span><span class="eye b">👁</span>
+            <span class="relay" style="left:26%"></span><span class="relay" style="left:50%"></span><span class="relay" style="left:74%"></span>
+            <span class="d" style="animation:mixflow 3.2s linear .2s infinite"></span><span class="d" style="animation:mixflow 5.4s linear 1.1s infinite"></span><span class="d" style="animation:mixflow 4.3s linear .5s infinite"></span><span class="d cover" style="animation:mixflow 4.8s linear 2s infinite"></span><span class="d cover" style="animation:mixflow 3.6s linear 2.8s infinite"></span><span class="d cover" style="animation:mixflow 5s linear 1.6s infinite"></span>
+          </div>
+          <div class="vs-note">Random delays, reordering and cover packets scramble the rhythm → nothing to line up.</div>
+        </div>
       </div>
     </div>
   </div>
