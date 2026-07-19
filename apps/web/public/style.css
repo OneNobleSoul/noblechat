@@ -158,6 +158,13 @@ input{font-family:var(--sans)}
 /* attachments */
 .att{cursor:pointer;border-radius:10px;overflow:hidden}
 .att img{display:block;max-width:100%;max-height:320px;border-radius:10px}
+.att[data-loaded][data-kind="image"] img{cursor:zoom-in}
+.lightbox{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.92);display:grid;place-items:center;padding:24px;backdrop-filter:blur(2px)}
+.lightbox[hidden]{display:none}
+.lightbox .lb-img{max-width:94vw;max-height:90vh;object-fit:contain;border-radius:8px;cursor:zoom-out}
+.lightbox .lb-close{position:absolute;top:14px;right:16px;width:40px;height:40px;border-radius:50%;border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.45);color:#fff;font-size:17px;line-height:1;cursor:pointer}
+.lightbox .lb-close:hover{background:rgba(0,0,0,.7)}
+body.lb-open{overflow:hidden}
 .att video{display:block;max-width:100%;max-height:320px;border-radius:10px;background:#000}
 .att-audio{padding:10px 12px;background:rgba(0,0,0,.18);border-radius:10px}
 .att-audio-name{font-size:12px;opacity:.85;margin-bottom:6px}

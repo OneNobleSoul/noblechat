@@ -34,7 +34,8 @@ const CFG = {
   maxBodyBytes: Number(process.env.MAX_BODY_BYTES || 64 * 1024),
   maxBlobBytes: Number(process.env.MAX_BLOB_BYTES || 512 * 1024),
   maxWsMsgBytes: Number(process.env.MAX_WS_MSG_BYTES || 128 * 1024),
-  maxUploadBytes: Number(process.env.MAX_UPLOAD_BYTES || 8 * 1024 * 1024),
+  // 500 MB of plaintext + a little headroom for the AES-GCM iv/tag the client prepends.
+  maxUploadBytes: Number(process.env.MAX_UPLOAD_BYTES || 501 * 1024 * 1024),
   maxConnPerIp: Number(process.env.MAX_CONN_PER_IP || 20),
   mailboxTtlMs: Number(process.env.MAILBOX_TTL_MS || 7 * 24 * 3600 * 1000),
   maxPerMailbox: Number(process.env.MAX_PER_MAILBOX || 1000),
@@ -535,6 +536,9 @@ async function main() {
   process.on("unhandledRejection", (e) => console.error("unhandledRejection", e));
 
   elog.add("info", "gateway started", `v${APP_VERSION}, transport=${live.transport}`);
+  // Large (up to 500 MB) encrypted uploads can take a while on slow links; the
+  // default 5-minute request timeout would abort them, so give them 30 minutes.
+  server.requestTimeout = 30 * 60 * 1000;
   server.listen(CFG.port, () => console.log(`NobleChat gateway on :${CFG.port}  (v${APP_VERSION}, mix ~${CFG.meanDelayMs}ms/hop, transport=${live.transport}, maintenance=${live.maintenance})`));
 }
 
