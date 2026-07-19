@@ -54,6 +54,27 @@ a{color:var(--accent)}
 .lockrow{display:flex;justify-content:space-around;margin-top:14px;font-size:11.5px;color:var(--dim);font-family:var(--mono)}
 .lockrow .l1{color:var(--accent)}
 
+/* ---- messenger comparison ---- */
+.cmp{display:grid;grid-template-columns:minmax(74px,1.3fr) repeat(4,minmax(0,1fr));gap:6px;font-family:var(--mono)}
+.cmp .hd{font-size:10px;line-height:1.2;color:var(--muted);text-align:center;align-self:end;padding-bottom:4px;overflow-wrap:anywhere;min-width:0}
+.cmp .hd.rl{text-align:left}
+.cmp .rl{font-size:12px;color:var(--text);display:flex;align-items:center;padding:8px 6px;background:#0a121a;border:1px solid var(--line);border-radius:8px;min-width:0}
+.cmp .rl.me{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--line));background:color-mix(in srgb,var(--accent) 9%,#0a121a);font-weight:700}
+.cmp .c{display:grid;place-items:center;font-size:15px;padding:8px 0;background:#0a121a;border:1px solid var(--line);border-radius:8px}
+.cmp .c.yes{color:var(--accent)}
+.cmp .c.mid{color:var(--warn)}
+.cmp .c.no{color:var(--dim)}
+.cmp .c.hl{border-color:color-mix(in srgb,var(--accent) 45%,var(--line));background:color-mix(in srgb,var(--accent) 9%,#0a121a)}
+.cmp-legend{grid-column:1/-1;text-align:center;font-size:10.5px;color:var(--dim);margin-top:4px}
+.cmp-note{color:var(--muted);font-size:13.5px;margin-top:12px}
+.cmp-note b{color:var(--accent)}
+@media(max-width:480px){
+  .cmp{grid-template-columns:minmax(58px,1.15fr) repeat(4,minmax(0,1fr));gap:5px}
+  .cmp .hd{font-size:8.5px}
+  .cmp .rl{font-size:10.5px;padding:7px 4px}
+  .cmp .c{font-size:13px;padding:7px 0}
+}
+
 /* ---- mixnet swarm (routing + cover traffic together) ---- */
 .swarm{position:relative;height:170px}
 .swarm .ep{position:absolute;top:50%;transform:translateY(-50%);width:44px;height:44px;border-radius:12px;display:grid;place-items:center;font-size:20px;background:#0a0e15;border:1px solid var(--line);z-index:3}
@@ -66,21 +87,16 @@ a{color:var(--accent)}
 .swarm .node{animation:nodepulse 3s ease-in-out infinite}
 .swarm .node.n1b{animation-delay:.5s}.swarm .node.n2{animation-delay:1s}.swarm .node.n2b{animation-delay:1.4s}.swarm .node.n3{animation-delay:2s}.swarm .node.n3b{animation-delay:2.4s}
 @keyframes nodepulse{0%,100%{border-color:var(--line);box-shadow:none}50%{border-color:color-mix(in srgb,var(--accent) 50%,var(--line));box-shadow:0 0 12px -3px var(--accent)}}
-.swarm .p{position:absolute;width:14px;height:14px;border-radius:4px;background:#1b2636;border:1px solid #2a3a50;left:-6%;animation:flow 5.5s linear infinite}
-.swarm .p.real{background:var(--accent);border-color:var(--accent);box-shadow:0 0 10px -1px var(--accent)}
-@keyframes flow{0%{left:-6%;opacity:0}5%{opacity:1}94%{opacity:1}100%{left:104%;opacity:0}}
-.swarm .p:nth-child(1){top:16%;animation-duration:5s;animation-delay:0s}
-.swarm .p:nth-child(2){top:30%;animation-duration:6s;animation-delay:.7s}
-.swarm .p:nth-child(3){top:44%;animation-duration:5.4s;animation-delay:1.3s}
-.swarm .p:nth-child(4){top:58%;animation-duration:6.2s;animation-delay:.3s}
-.swarm .p:nth-child(5){top:72%;animation-duration:5.2s;animation-delay:1.8s}
-.swarm .p:nth-child(6){top:24%;animation-duration:6.6s;animation-delay:2.4s}
-.swarm .p:nth-child(7){top:50%;animation-duration:5.8s;animation-delay:3s}
-.swarm .p:nth-child(8){top:66%;animation-duration:5.1s;animation-delay:2.1s}
-.swarm .p:nth-child(9){top:38%;animation-duration:6.4s;animation-delay:3.6s}
-.swarm .p:nth-child(10){top:20%;animation-duration:5.6s;animation-delay:4.2s}
-.swarm .p:nth-child(11){top:60%;animation-duration:6s;animation-delay:4.8s}
-.swarm .p:nth-child(12){top:46%;animation-duration:5.3s;animation-delay:1.1s}
+.swarm .p{position:absolute;width:10px;height:10px;border-radius:3px;background:#101a26;border:1px solid #223047;left:-6%;animation:flow 8.5s linear infinite}
+.swarm .p.real{width:14px;height:14px;background:var(--accent);border-color:var(--accent);box-shadow:0 0 10px -1px var(--accent)}
+@keyframes flow{0%{left:-6%;opacity:0}9%{opacity:.9}91%{opacity:.9}100%{left:104%;opacity:0}}
+.swarm .p:nth-child(1){top:34%;animation-duration:8.5s;animation-delay:0s}
+.swarm .p:nth-child(2){top:52%;animation-duration:8s;animation-delay:2.3s}
+.swarm .p:nth-child(3){top:42%;animation-duration:9s;animation-delay:4.2s}
+.swarm .p:nth-child(4){top:60%;animation-duration:8.6s;animation-delay:1.3s}
+.swarm .p:nth-child(5){top:46%;animation-duration:8.2s;animation-delay:5.7s}
+.swarm .p:nth-child(6){top:56%;animation-duration:9.2s;animation-delay:3.4s}
+.swarm .p:nth-child(7){top:38%;animation-duration:8.8s;animation-delay:6.5s}
 .swarm .legend{position:absolute;bottom:-2px;left:0;right:0;display:flex;justify-content:center;gap:20px;font-family:var(--mono);font-size:10.5px;color:var(--dim)}
 .swarm .legend .g1{color:var(--accent)}
 
@@ -155,7 +171,34 @@ a{color:var(--accent)}
 
   <div class="card">
     <h2><span class="n">2</span> Safe even against tomorrow's computers</h2>
-    <p class="sub">On top of that, the encryption uses modern "post-quantum" methods. So even if someone records your messages today and tries to crack them years from now with a quantum computer, they still can't get in. Future-proofing, built in.</p>
+    <p class="sub">On top of that, the encryption uses modern "post-quantum" methods. So even if someone records your messages today and tries to crack them years from now with a quantum computer, they still can't get in. Future-proofing, built in. Here is how that and a few other things line up against messengers you may know:</p>
+    <div class="stage">
+      <div class="cmp">
+        <div class="hd rl"></div>
+        <div class="hd">end-to-end</div>
+        <div class="hd">quantum-<br>safe</div>
+        <div class="hd">hides who<br>talks to whom</div>
+        <div class="hd">no phone/<br>email needed</div>
+
+        <div class="rl me">◆ NobleChat</div>
+        <div class="c yes hl">✓</div><div class="c yes hl">✓</div><div class="c yes hl">✓</div><div class="c yes hl">✓</div>
+
+        <div class="rl">Signal</div>
+        <div class="c yes">✓</div><div class="c yes">✓</div><div class="c mid">~</div><div class="c no">✕</div>
+
+        <div class="rl">Threema</div>
+        <div class="c yes">✓</div><div class="c no">✕</div><div class="c mid">~</div><div class="c yes">✓</div>
+
+        <div class="rl">WhatsApp</div>
+        <div class="c yes">✓</div><div class="c no">✕</div><div class="c no">✕</div><div class="c no">✕</div>
+
+        <div class="rl">Discord</div>
+        <div class="c no">✕</div><div class="c no">✕</div><div class="c no">✕</div><div class="c no">✕</div>
+
+        <div class="cmp-legend">✓ yes&nbsp;&nbsp;·&nbsp;&nbsp;~ partly&nbsp;&nbsp;·&nbsp;&nbsp;✕ no</div>
+      </div>
+      <p class="cmp-note">Signal is genuinely excellent and also post-quantum. Where NobleChat goes further: it hides <b>who is talking to whom</b> behind a mix network, and there is no phone number or email tied to you in the first place.</p>
+    </div>
   </div>
 
   <div class="card">
@@ -167,7 +210,7 @@ a{color:var(--accent)}
         <div class="node n2b"></div><div class="node n1"></div><div class="node n1b"></div>
         <div class="node n2"></div><div class="node n3"></div><div class="node n3b"></div>
         <div class="ep friend">🧑<span class="lbl">friend</span></div>
-        <span class="p real"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p real"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p real"></span><span class="p"></span>
+        <span class="p"></span><span class="p real"></span><span class="p"></span><span class="p"></span><span class="p real"></span><span class="p"></span><span class="p"></span>
         <div class="legend"><span class="g1">■ your real message</span><span>■ everyone's traffic, mixed together</span></div>
       </div>
     </div>
