@@ -25,7 +25,7 @@ const state = {
   transport: "internal", nymAddress: null,
   soundOn: true, muted: new Set(), blocked: new Set(), unread: new Map(),
   presence: new Map(), presenceTimer: null, histTimer: null, expireTimer: null,
-  replyingTo: null, groups: new Map(),
+  replyingTo: null, groups: new Map(), call: null,
 };
 
 const ls = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* */ } }, del: (k) => { try { localStorage.removeItem(k); } catch { /* */ } } };
@@ -374,6 +374,7 @@ function onDeliver(envelope) {
   const me = state.user;
   const sender = content.from || "unknown";
   if (sender !== me && state.blocked.has(sender)) return; // blocked sender: drop
+  if (content.t === "call") { if (sender !== me) handleCallSignal(content); return; }
   const isG = !!(content.g && content.g.id);
   if (isG) ensureGroup(content.g);
   const convKey = isG ? "g:" + content.g.id : (sender === me ? (content.to || "unknown") : sender);
@@ -641,6 +642,7 @@ function setActive(handle) {
   $("#chat-with").textContent = g ? g.name : handle;
   clearUnread(handle);
   renderContacts(); renderMessages(); updateChatHeadPresence(); setMobileView("chat");
+  const cv = $("#call-voice"), cvd = $("#call-video"); if (cv) cv.hidden = !!g; if (cvd) cvd.hidden = !!g;
   if (!g) pollPresence();
   const mi = $("#msg-input"); if (mi) mi.focus();
 }
@@ -902,6 +904,140 @@ function buildNetViz() {
 }
 function pulseHop(label) { let col = -1; const m = /^mix-L(\d+)/.exec(label); if (m) col = Number(m[1]); else if (label.startsWith("provider")) col = state.net.layers.length; const node = state.netCols[col]; if (!node) return; node.classList.add("pulse"); setTimeout(() => node.classList.remove("pulse"), 320); }
 
+// ---------- voice / video calls (WebRTC, signalled over the E2E channel) ----------
+const ICE_SERVERS = [
+  { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
+];
+function sendCallSignal(peer, obj) {
+  const content = { v: 1, t: "call", from: state.user, to: peer, id: randHex(8), ts: Date.now(), ...obj };
+  for (const card of (state.contacts.get(peer) || [])) sendToCard(card, content);
+  state.seen.add(content.id);
+}
+function newPeerConnection(peer, callId) {
+  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  pc.onicecandidate = (e) => { if (e.candidate) sendCallSignal(peer, { sub: "ice", callId, candidate: JSON.stringify(e.candidate) }); };
+  pc.ontrack = (e) => {
+    const c = state.call; if (!c) return;
+    c.remoteStream = c.remoteStream || new MediaStream();
+    c.remoteStream.addTrack(e.track);
+    const rv = $("#call-remote"); if (rv) { rv.srcObject = c.remoteStream; rv.play?.().catch(() => {}); }
+    renderCallVideoState();
+  };
+  pc.onconnectionstatechange = () => {
+    const c = state.call; if (!c) return;
+    if (pc.connectionState === "connected") { c.state = "in-call"; if (!c.startedAt) { c.startedAt = Date.now(); startCallTimer(); } renderCall(); }
+    else if (pc.connectionState === "failed" || pc.connectionState === "closed") endCall(false);
+  };
+  return pc;
+}
+async function getLocalMedia(video) {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: video ? { width: 640, height: 480 } : false });
+  return stream;
+}
+async function startCall(peer, video) {
+  if (state.call) { toast("already in a call"); return; }
+  if (isGroupKey(peer)) { toast("calls are 1:1 only"); return; }
+  const callId = randHex(8);
+  state.call = { peer, callId, video, role: "caller", state: "calling", pc: null, localStream: null, remoteStream: null, startedAt: 0, timer: null };
+  try {
+    const stream = await getLocalMedia(video);
+    state.call.localStream = stream;
+    const pc = newPeerConnection(peer, callId); state.call.pc = pc;
+    for (const t of stream.getTracks()) pc.addTrack(t, stream);
+    showCall(); renderCall();
+    const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
+    sendCallSignal(peer, { sub: "offer", callId, sdp: JSON.stringify(offer), video: !!video });
+  } catch (e) { toast("could not start call (mic/cam blocked?)"); endCall(false); }
+}
+function handleCallSignal(c) {
+  const peer = c.from;
+  if (c.sub === "offer") {
+    if (state.call) { sendCallSignal(peer, { sub: "reject", callId: c.callId, reason: "busy" }); return; }
+    state.call = { peer, callId: c.callId, video: !!c.video, role: "callee", state: "incoming", pc: null, localStream: null, remoteStream: null, offer: c.sdp, startedAt: 0, timer: null };
+    showIncoming(peer, !!c.video); beep(); beep();
+    return;
+  }
+  const call = state.call; if (!call || call.callId !== c.callId) return;
+  if (c.sub === "answer") { call.pc && call.pc.setRemoteDescription(JSON.parse(c.sdp)).catch(() => {}); }
+  else if (c.sub === "ice") { try { call.pc && call.pc.addIceCandidate(JSON.parse(c.candidate)).catch(() => {}); } catch { /* */ } }
+  else if (c.sub === "hangup" || c.sub === "reject") { toast(c.sub === "reject" ? "call declined" : "call ended"); endCall(false); }
+}
+async function acceptCall() {
+  const call = state.call; if (!call || call.role !== "callee") return;
+  try {
+    const stream = await getLocalMedia(call.video); call.localStream = stream;
+    const pc = newPeerConnection(call.peer, call.callId); call.pc = pc;
+    for (const t of stream.getTracks()) pc.addTrack(t, stream);
+    await pc.setRemoteDescription(JSON.parse(call.offer));
+    const answer = await pc.createAnswer(); await pc.setLocalDescription(answer);
+    sendCallSignal(call.peer, { sub: "answer", callId: call.callId, sdp: JSON.stringify(answer) });
+    call.state = "connecting"; hideIncoming(); showCall(); renderCall();
+  } catch (e) { toast("could not accept (mic/cam blocked?)"); rejectCall(); }
+}
+function rejectCall() {
+  const call = state.call; if (!call) return;
+  sendCallSignal(call.peer, { sub: "reject", callId: call.callId });
+  endCall(false);
+}
+function endCall(sendHangup = true) {
+  const call = state.call; if (!call) return;
+  if (sendHangup) sendCallSignal(call.peer, { sub: "hangup", callId: call.callId });
+  try { call.pc && call.pc.close(); } catch { /* */ }
+  try { call.localStream && call.localStream.getTracks().forEach((t) => t.stop()); } catch { /* */ }
+  if (call.timer) clearInterval(call.timer);
+  state.call = null;
+  hideIncoming(); hideCall();
+}
+function toggleMic() { const c = state.call; if (!c || !c.localStream) return; const t = c.localStream.getAudioTracks()[0]; if (t) { t.enabled = !t.enabled; $("#call-mic").classList.toggle("off", !t.enabled); } }
+function toggleCam() { const c = state.call; if (!c || !c.localStream) return; const t = c.localStream.getVideoTracks()[0]; if (t) { t.enabled = !t.enabled; $("#call-cam").classList.toggle("off", !t.enabled); } }
+function startCallTimer() {
+  const c = state.call; if (!c) return;
+  c.timer = setInterval(() => { const el = $("#call-timer"); if (el && c.startedAt) { const s = Math.floor((Date.now() - c.startedAt) / 1000); el.textContent = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`; } }, 1000);
+}
+function showIncoming(peer, video) {
+  const el = ensureEl("call-incoming", "call-incoming");
+  el.innerHTML = `<div class="ci-card"><div class="ci-avatar">${esc(peer[0] || "?").toUpperCase()}</div><div class="ci-name">${esc(peer)}</div><div class="ci-sub">incoming ${video ? "video" : "voice"} call…</div><div class="ci-actions"><button id="ci-reject" class="call-btn hangup">✕</button><button id="ci-accept" class="call-btn accept">📞</button></div></div>`;
+  el.hidden = false;
+  $("#ci-accept").onclick = acceptCall; $("#ci-reject").onclick = rejectCall;
+}
+function hideIncoming() { const el = document.getElementById("call-incoming"); if (el) el.hidden = true; }
+function showCall() {
+  const el = ensureEl("call-overlay", "call-overlay");
+  el.innerHTML = `
+    <div class="call-videos">
+      <video id="call-remote" class="call-remote" autoplay playsinline></video>
+      <video id="call-local" class="call-local" autoplay playsinline muted></video>
+      <div id="call-audio-ph" class="call-audio-ph"><div class="ci-avatar big">${esc((state.call?.peer || "?")[0].toUpperCase())}</div><div class="ci-name">${esc(state.call?.peer || "")}</div><div id="call-status" class="ci-sub">calling…</div></div>
+    </div>
+    <div class="call-bar">
+      <button id="call-mic" class="call-btn" title="Mute">🎤</button>
+      ${state.call?.video ? '<button id="call-cam" class="call-btn" title="Camera">📷</button>' : ""}
+      <button id="call-end" class="call-btn hangup" title="Hang up">📞</button>
+      <span id="call-timer" class="call-timer"></span>
+    </div>`;
+  el.hidden = false;
+  const c = state.call;
+  if (c && c.localStream) { const lv = $("#call-local"); if (lv) lv.srcObject = c.localStream; }
+  $("#call-end").onclick = () => endCall(true);
+  const mic = $("#call-mic"); if (mic) mic.onclick = toggleMic;
+  const cam = $("#call-cam"); if (cam) cam.onclick = toggleCam;
+  renderCallVideoState();
+}
+function hideCall() { const el = document.getElementById("call-overlay"); if (el) el.hidden = true; }
+function renderCall() {
+  const c = state.call; if (!c) return;
+  const st = $("#call-status"); if (st) st.textContent = c.state === "in-call" ? "connected" : (c.state === "connecting" ? "connecting…" : "calling…");
+  renderCallVideoState();
+}
+function renderCallVideoState() {
+  const c = state.call; if (!c) return;
+  const hasRemoteVideo = c.remoteStream && c.remoteStream.getVideoTracks().length > 0;
+  const ph = $("#call-audio-ph"); const rv = $("#call-remote"); const lv = $("#call-local");
+  if (ph) ph.style.display = (c.video && hasRemoteVideo) ? "none" : "flex";
+  if (rv) rv.style.display = (c.video && hasRemoteVideo) ? "block" : "none";
+  if (lv) lv.style.display = (c.video && c.localStream && c.localStream.getVideoTracks().length) ? "block" : "none";
+}
+
 // ---------- new-group dialog ----------
 function openGroupModal() {
   const modal = $("#group-modal"); if (!modal) return;
@@ -929,6 +1065,8 @@ function wireUI() {
   $("#add-go").addEventListener("click", () => { fetchBundle($("#add-handle").value, { silent: false }); $("#add-handle").value = ""; });
   $("#add-handle").addEventListener("keydown", (e) => { if (e.key === "Enter") { fetchBundle($("#add-handle").value, { silent: false }); $("#add-handle").value = ""; } });
   const ng = $("#new-group"); if (ng) ng.addEventListener("click", openGroupModal);
+  const cv = $("#call-voice"); if (cv) cv.addEventListener("click", () => state.active && startCall(state.active, false));
+  const cvd = $("#call-video"); if (cvd) cvd.addEventListener("click", () => state.active && startCall(state.active, true));
   const gc = $("#group-cancel"); if (gc) gc.addEventListener("click", closeGroupModal);
   const gcr = $("#group-create"); if (gcr) gcr.addEventListener("click", submitGroup);
   $("#msg-send").addEventListener("click", sendMessage);
