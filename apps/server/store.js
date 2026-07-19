@@ -50,9 +50,12 @@ CREATE TABLE IF NOT EXISTS files (
   id          TEXT PRIMARY KEY,
   mime        TEXT NOT NULL,
   data        BYTEA NOT NULL,
-  created_at  BIGINT NOT NULL
+  created_at  BIGINT NOT NULL,
+  expires_at  BIGINT
 );
+ALTER TABLE files ADD COLUMN IF NOT EXISTS expires_at BIGINT;
 CREATE INDEX IF NOT EXISTS idx_files_created ON files (created_at);
+CREATE INDEX IF NOT EXISTS idx_files_expires ON files (expires_at);
 `;
 
 async function withRetry(fn, { tries = 30, delayMs = 1000 } = {}) {
@@ -146,16 +149,25 @@ export async function openStore(databaseUrl, { mailboxTtlMs = 7 * 24 * 3600 * 10
     async prune() {
       await pool.query("DELETE FROM mailbox WHERE created_at < $1", [now() - mailboxTtlMs]);
       await pool.query("DELETE FROM files WHERE created_at < $1", [now() - mailboxTtlMs]);
+      await this.pruneExpiredFiles();
+    },
+    // Deletes attachments whose auto-delete time has passed. Called often so the
+    // ciphertext is gone from the server shortly after it expires.
+    async pruneExpiredFiles() {
+      await pool.query("DELETE FROM files WHERE expires_at IS NOT NULL AND expires_at < $1", [now()]);
     },
 
     // ---- encrypted file attachments (opaque ciphertext; the key travels only
     // inside the end-to-end message, never here) ----
-    async saveFile(id, mime, buf) {
-      await pool.query("INSERT INTO files(id,mime,data,created_at) VALUES($1,$2,$3,$4)", [id, String(mime).slice(0, 100), buf, now()]);
+    async saveFile(id, mime, buf, expiresAt = null) {
+      await pool.query("INSERT INTO files(id,mime,data,created_at,expires_at) VALUES($1,$2,$3,$4,$5)", [id, String(mime).slice(0, 100), buf, now(), expiresAt]);
     },
     async getFile(id) {
-      const r = await pool.query("SELECT mime, data FROM files WHERE id=$1", [id]);
-      return r.rows[0] || null;
+      const r = await pool.query("SELECT mime, data, expires_at FROM files WHERE id=$1", [id]);
+      const f = r.rows[0];
+      if (!f) return null;
+      if (f.expires_at != null && Number(f.expires_at) < now()) { await pool.query("DELETE FROM files WHERE id=$1", [id]); return null; }
+      return f;
     },
 
     // ---- admin / moderation (account-level) ----

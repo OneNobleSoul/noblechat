@@ -216,6 +216,8 @@ function startApp() {
   setMobileView("list");
   connectWS(); wireUI(); renderContacts(); updateNetPanel();
   pollPresence(); if (!state.presenceTimer) state.presenceTimer = setInterval(pollPresence, 15000);
+  sweepExpiredImages();
+  if (!state.expireTimer) state.expireTimer = setInterval(() => { sweepExpiredImages(); if (state.active && (state.convos.get(state.active) || []).some((m) => m.file && m.file.expireAt && !m.expired)) renderMessages(); }, 5000);
 }
 
 // ---- presence (online/offline) ----
@@ -469,7 +471,7 @@ async function decryptBytes(keyRaw, blob) {
   const raw = new Uint8Array(blob);
   return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: raw.slice(0, 12) }, key, raw.slice(12)));
 }
-async function sendFile(file) {
+async function sendFile(file, expireSec = 0) {
   if (!state.active) return;
   if (file.size > MAX_FILE_BYTES) { toast("file too large (max 8 MB)"); return; }
   const target = state.active;
@@ -478,12 +480,54 @@ async function sendFile(file) {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const keyRaw = crypto.getRandomValues(new Uint8Array(32));
     const enc = await encryptBytes(keyRaw, bytes);
-    const r = await fetch(`/api/upload?token=${encodeURIComponent(state.token)}`, { method: "POST", headers: { "content-type": "application/octet-stream", "x-file-type": file.type || "application/octet-stream" }, body: enc });
+    const headers = { "content-type": "application/octet-stream", "x-file-type": file.type || "application/octet-stream" };
+    if (expireSec > 0) headers["x-expire-sec"] = String(expireSec);
+    const r = await fetch(`/api/upload?token=${encodeURIComponent(state.token)}`, { method: "POST", headers, body: enc });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j.id) { toast(j.error || "upload failed"); return; }
     const fileMeta = { name: file.name.slice(0, 120), mime: file.type || "application/octet-stream", size: file.size, id: j.id, key: toB64(keyRaw) };
+    if (expireSec > 0) fileMeta.expireAt = Date.now() + expireSec * 1000;
     await deliverContent(target, "", { file: fileMeta });
   } catch { toast("could not send file"); }
+}
+
+// Auto-delete durations offered for image attachments.
+const EXPIRE_OPTS = [
+  { label: "Keep", sec: 0 },
+  { label: "10 seconds", sec: 10 },
+  { label: "1 minute", sec: 60 },
+  { label: "5 minutes", sec: 300 },
+  { label: "1 hour", sec: 3600 },
+  { label: "1 day", sec: 86400 },
+];
+// When an image is picked, ask how long it should live before sending.
+function askImageExpiry(file, anchor) {
+  const existing = document.getElementById("expire-pop");
+  const pop = existing || Object.assign(document.createElement("div"), { id: "expire-pop", className: "menu-pop" });
+  if (!existing) document.body.appendChild(pop);
+  pop.innerHTML = `<div class="menu-head">Auto-delete image</div>`;
+  for (const o of EXPIRE_OPTS) {
+    const b = document.createElement("button"); b.className = "menu-item"; b.textContent = o.sec ? "🕓 " + o.label : "♾ " + o.label;
+    b.addEventListener("click", (e) => { e.stopPropagation(); closeMenus(); sendFile(file, o.sec); });
+    pop.appendChild(b);
+  }
+  const r = anchor.getBoundingClientRect();
+  pop.style.position = "fixed"; pop.style.left = `${Math.min(r.left, window.innerWidth - 200)}px`; pop.style.bottom = `${window.innerHeight - r.top + 6}px`; pop.style.top = "auto";
+  closeMenus(); pop.hidden = false; pop.classList.add("open");
+}
+
+// Remove image attachments whose auto-delete time has passed, everywhere they
+// are held locally, then persist. The server drops the ciphertext on its own.
+function sweepExpiredImages() {
+  let changed = false;
+  for (const [, arr] of state.convos) {
+    for (const m of arr) {
+      if (m.file && m.file.expireAt && !m.expired && Date.now() > m.file.expireAt) {
+        m.expired = true; m.file = { name: m.file.name, expired: true }; changed = true;
+      }
+    }
+  }
+  if (changed) { if (state.active) renderMessages(); scheduleSaveConvos(); }
 }
 
 // ---------- state + render ----------
@@ -614,6 +658,10 @@ function openChatMenu() {
   if (!wasOpen) { pop.hidden = false; pop.classList.add("open"); }
 }
 function fmtSize(n) { n = Number(n) || 0; if (n < 1024) return n + " B"; if (n < 1048576) return (n / 1024).toFixed(0) + " KB"; return (n / 1048576).toFixed(1) + " MB"; }
+function fmtRemaining(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return s + "s"; if (s < 3600) return Math.round(s / 60) + "m"; if (s < 86400) return Math.round(s / 3600) + "h"; return Math.round(s / 86400) + "d";
+}
 function renderMessages() {
   const el = $("#messages"); const msgs = state.convos.get(state.active) || [];
   el.innerHTML = msgs.map((m, i) => {
@@ -621,8 +669,11 @@ function renderMessages() {
     let inner = m.body ? esc(m.body) : "";
     if (m.file) {
       const f = m.file; const isImg = String(f.mime || "").startsWith("image/");
-      if (isImg) inner = `<div class="att att-img" data-mi="${i}"><div class="att-ph">🖼 ${esc(f.name)} · tap to load</div></div>` + (m.body ? `<div class="att-cap">${esc(m.body)}</div>` : "");
-      else inner = `<div class="att att-file" data-mi="${i}"><span class="att-ic">📄</span><span class="att-meta"><b>${esc(f.name)}</b><span>${fmtSize(f.size)} · tap to download</span></span></div>` + (m.body ? `<div class="att-cap">${esc(m.body)}</div>` : "");
+      if (f.expired) inner = `<div class="att att-expired">🕓 image deleted</div>`;
+      else if (isImg) {
+        const exp = f.expireAt ? `<span class="att-timer" title="auto-deletes">🕓 ${fmtRemaining(f.expireAt - Date.now())}</span>` : "";
+        inner = `<div class="att att-img" data-mi="${i}"><div class="att-ph">🖼 ${esc(f.name)} · tap to load ${exp}</div></div>` + (m.body ? `<div class="att-cap">${esc(m.body)}</div>` : "");
+      } else inner = `<div class="att att-file" data-mi="${i}"><span class="att-ic">📄</span><span class="att-meta"><b>${esc(f.name)}</b><span>${fmtSize(f.size)} · tap to download</span></span></div>` + (m.body ? `<div class="att-cap">${esc(m.body)}</div>` : "");
     }
     return `<div class="msg ${m.dir}">${inner}<span class="t">${time}</span></div>`;
   }).join("");
@@ -689,7 +740,16 @@ function wireUI() {
   const btgl = $("#blocked-toggle"); if (btgl) btgl.addEventListener("click", () => { const l = $("#blocked-list"); l.hidden = !l.hidden; });
   wireEmoji();
   const ab = $("#attach-btn"), fi = $("#file-input");
-  if (ab && fi) { ab.addEventListener("click", () => fi.click()); fi.addEventListener("change", () => { const f = fi.files && fi.files[0]; if (f) sendFile(f); fi.value = ""; }); }
+  if (ab && fi) {
+    ab.addEventListener("click", () => fi.click());
+    fi.addEventListener("change", () => {
+      const f = fi.files && fi.files[0]; fi.value = "";
+      if (!f) return;
+      // Images get an auto-delete choice; other files send straight away.
+      if (String(f.type || "").startsWith("image/")) askImageExpiry(f, ab);
+      else sendFile(f, 0);
+    });
+  }
   document.addEventListener("click", (e) => { if (!e.target.closest(".menu-pop") && !e.target.closest(".row-menu") && !e.target.closest("#chat-menu")) closeMenus(); if (!e.target.closest(".emoji-wrap")) closeEmoji(); });
   window.addEventListener("focus", () => { if (state.active) clearUnread(state.active); });
   updateStats();
