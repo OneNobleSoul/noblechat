@@ -391,7 +391,7 @@ function onDeliver(envelope) {
   const dir = sender === me ? "out" : "in";
   pushMessage(convKey, { dir, sender, body: content.body, ts: content.ts || Date.now(), id: content.id, file: content.file, replyTo: content.replyTo });
   if (sender !== me) {
-    state.stats.recv++; updateStats();
+    state.stats.recv++; updateStats(); emitPacket("recv");
     const muted = state.muted.has(convKey);
     if (state.active !== convKey) bumpUnread(convKey);
     if (!muted && (state.active !== convKey || document.hidden)) {
@@ -515,7 +515,7 @@ async function fanOutConv(convKey, content) {
 async function deliverContent(convKey, body, extra = {}) {
   const r = await fanOutConv(convKey, { t: "msg", body, ...extra });
   pushMessage(convKey, { dir: "out", sender: state.user, body, ts: r.ts, id: r.id, file: extra.file, replyTo: extra.replyTo });
-  state.stats.sent++; updateStats();
+  state.stats.sent++; updateStats(); emitPacket("real");
   if (!r.ok) toast("sent, but no devices reachable yet");
   return true;
 }
@@ -886,7 +886,7 @@ function toggleCover() {
   if (state.coverOn) { toast("cover traffic on - hiding when you talk"); scheduleCover(); } else clearTimeout(state.coverTimer);
 }
 function scheduleCover() { clearTimeout(state.coverTimer); state.coverTimer = setTimeout(() => { sendCover(); if (state.coverOn) scheduleCover(); }, poisson(3500) + 800); }
-function sendCover() { if (!state.ws || state.ws.readyState !== 1) return; try { activeTransport().submit(state.identity.card, { t: "cover", ts: 0 }); state.stats.cover++; updateStats(); } catch { /* */ } }
+function sendCover() { if (!state.ws || state.ws.readyState !== 1) return; try { activeTransport().submit(state.identity.card, { t: "cover", ts: 0 }); state.stats.cover++; updateStats(); emitPacket(""); } catch { /* */ } }
 
 // ---------- notification sound toggle ----------
 function renderSoundToggle() { const b = $("#sound-toggle"); if (!b) return; b.textContent = state.soundOn ? "🔔" : "🔕"; b.classList.toggle("on", state.soundOn); b.title = state.soundOn ? "Message sound: on" : "Message sound: off"; }
@@ -900,7 +900,28 @@ function buildNetViz() {
   const wrap = $("#net-layers"); const cols = state.net.layers.length + 1;
   const labels = state.net.layers.map((_, i) => "L" + (i + 1)).concat(["exit"]); let html = "";
   for (let i = 0; i < cols; i++) { html += `<div class="net-col"><div class="net-node" data-col="${i}">◆</div><div class="net-lbl">${labels[i]}</div></div>`; if (i < cols - 1) html += `<div class="net-arrow">→</div>`; }
-  wrap.innerHTML = html; state.netCols = [...wrap.querySelectorAll(".net-node")];
+  // an always-alive flow of packets streaming through the layers: mostly dim cover
+  // traffic, so the panel keeps moving even when the mix reports no per-hop events
+  html += '<div class="net-flow" aria-hidden="true">';
+  const delays = [0, 0.8, 1.6, 2.4, 3.2, 4.0];
+  for (const d of delays) html += `<span class="fd" style="animation-delay:${d}s;top:${13 + (d * 10 % 9)}px"></span>`;
+  html += "</div>";
+  wrap.innerHTML = html;
+  state.netCols = [...wrap.querySelectorAll(".net-node")];
+  state.netFlow = wrap.querySelector(".net-flow");
+}
+// send a single packet down the flow. kind: "real" (your message, bright, lights
+// each layer in turn), "recv" (incoming, blue) or "" (extra cover, dim).
+function emitPacket(kind) {
+  const flow = state.netFlow; if (!flow) return;
+  const d = document.createElement("span");
+  d.className = "fd once" + (kind ? " " + kind : "");
+  d.style.top = (13 + Math.floor(Math.random() * 9)) + "px";
+  d.addEventListener("animationend", () => d.remove());
+  flow.appendChild(d);
+  if (kind === "real" && state.netCols) {
+    state.netCols.forEach((n, i) => setTimeout(() => { n.classList.add("pulse"); setTimeout(() => n.classList.remove("pulse"), 300); }, 260 + i * 480));
+  }
 }
 function pulseHop(label) { let col = -1; const m = /^mix-L(\d+)/.exec(label); if (m) col = Number(m[1]); else if (label.startsWith("provider")) col = state.net.layers.length; const node = state.netCols[col]; if (!node) return; node.classList.add("pulse"); setTimeout(() => node.classList.remove("pulse"), 320); }
 
