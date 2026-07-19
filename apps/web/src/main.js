@@ -25,7 +25,7 @@ const state = {
   transport: "internal", nymAddress: null,
   soundOn: true, muted: new Set(), blocked: new Set(), unread: new Map(),
   presence: new Map(), presenceTimer: null, histTimer: null, expireTimer: null,
-  replyingTo: null,
+  replyingTo: null, groups: new Map(),
 };
 
 const ls = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* */ } }, del: (k) => { try { localStorage.removeItem(k); } catch { /* */ } } };
@@ -237,6 +237,8 @@ async function pollPresence() {
 function updateChatHeadPresence() {
   const el = $("#chat-presence"); if (!el) return;
   if (!state.active) { el.textContent = ""; el.className = "presence"; return; }
+  const g = groupOfKey(state.active);
+  if (g) { el.className = "presence"; el.textContent = `${(g.members || []).length} members`; return; }
   const on = state.presence.get(state.active);
   el.className = "presence " + (on ? "on" : "off");
   el.textContent = on ? "online" : "offline";
@@ -247,11 +249,17 @@ async function loadMyBundle() {
   try { const r = await fetch("/api/bundle?handle=" + encodeURIComponent(state.user)); if (r.ok) { const j = await r.json(); state.myBundle = (j.devices || []).map(deserializeCard); } } catch { /* */ }
 }
 function loadContactsLocal() {
-  try { const arr = JSON.parse(ls.get(K.contacts) || "[]"); for (const entry of arr) state.contacts.set(entry.handle, entry.cards.map(deserializeCard)); } catch { /* */ }
+  try {
+    const raw = JSON.parse(ls.get(K.contacts) || "[]");
+    // legacy format was a bare array of {handle,cards}; new one wraps groups too
+    const arr = Array.isArray(raw) ? raw : (raw.contacts || []);
+    for (const entry of arr) state.contacts.set(entry.handle, entry.cards.map(deserializeCard));
+    if (!Array.isArray(raw)) for (const g of (raw.groups || [])) if (g && g.id) state.groups.set(g.id, g);
+  } catch { /* */ }
 }
 function saveContactsLocal() {
-  const arr = [...state.contacts.entries()].map(([handle, cards]) => ({ handle, cards: cards.map(serializeCard) }));
-  ls.set(K.contacts, JSON.stringify(arr));
+  const contacts = [...state.contacts.entries()].map(([handle, cards]) => ({ handle, cards: cards.map(serializeCard) }));
+  ls.set(K.contacts, JSON.stringify({ contacts, groups: [...state.groups.values()] }));
 }
 // ---- conversation history (persisted locally, encrypted with the blob key) ----
 // Survives reloads. Stored only on this device; the server never sees it.
@@ -279,7 +287,7 @@ async function loadConvos() {
 async function uploadContactsBlob() {
   if (!state.blobKey || !state.token) return;
   try {
-    const payload = { v: 2, contacts: [...state.contacts.keys()], muted: [...state.muted], blocked: [...state.blocked] };
+    const payload = { v: 3, contacts: [...state.contacts.keys()], muted: [...state.muted], blocked: [...state.blocked], groups: [...state.groups.values()] };
     const blob = await encryptBlob(state.blobKey, payload);
     await fetch("/api/account/blob", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: state.token, blob }) });
   } catch { /* */ }
@@ -297,6 +305,7 @@ async function loadContactsFromBlob() {
     if (!Array.isArray(data)) {
       for (const h of (data.muted || [])) state.muted.add(h);
       for (const h of (data.blocked || [])) state.blocked.add(h);
+      for (const g of (data.groups || [])) if (g && g.id && !state.groups.has(g.id)) state.groups.set(g.id, g);
       savePrefs();
     }
     for (const h of handles) if (!state.contacts.has(h) && !state.blocked.has(h)) await fetchBundle(h, { silent: true, noSave: true });
@@ -344,56 +353,74 @@ function connectWS() {
   });
 }
 
+// A conversation key is a plain handle for 1:1 chats or "g:<groupId>" for groups.
+function isGroupKey(k) { return typeof k === "string" && k.startsWith("g:"); }
+function groupOfKey(k) { return isGroupKey(k) ? state.groups.get(k.slice(2)) : null; }
+// Ensure a group exists locally, creating/refreshing it from a message's copy.
+function ensureGroup(g) {
+  if (!g || !g.id) return;
+  const cur = state.groups.get(g.id);
+  if (!cur || (Array.isArray(g.members) && g.members.length)) {
+    state.groups.set(g.id, { id: g.id, name: String(g.name || cur?.name || "group").slice(0, 60), members: Array.isArray(g.members) ? g.members : (cur?.members || []) });
+    saveContactsLocal(); uploadContactsBlob();
+  }
+}
+
 function onDeliver(envelope) {
   let content; try { content = openIncoming(state.identity, envelope); } catch { return; }
   if (content.t === "cover") return;
   if (content.id && state.seen.has(content.id)) return;
   if (content.id) state.seen.add(content.id);
   const me = state.user;
-  const peer = content.from === me ? (content.to || "unknown") : (content.from || "unknown");
-  if (content.from !== me && state.blocked.has(peer)) return; // blocked sender: drop
+  const sender = content.from || "unknown";
+  if (sender !== me && state.blocked.has(sender)) return; // blocked sender: drop
+  const isG = !!(content.g && content.g.id);
+  if (isG) ensureGroup(content.g);
+  const convKey = isG ? "g:" + content.g.id : (sender === me ? (content.to || "unknown") : sender);
 
   // reactions and unsend act on an existing message rather than adding one
-  if (content.t === "react") { applyReaction(peer, content); return; }
-  if (content.t === "unsend") { applyUnsend(peer, content); return; }
+  if (content.t === "react") { applyReaction(convKey, content); return; }
+  if (content.t === "unsend") { applyUnsend(convKey, content); return; }
   if (content.t !== "msg") return;
+  // an empty message with no attachment is just a group-creation ping: it made
+  // the group exist locally (above), nothing to show.
+  if (!content.body && !content.file) { if (isG) renderContacts(); return; }
 
-  ensureContact(peer);
-  const dir = content.from === me ? "out" : "in";
-  pushMessage(peer, { dir, body: content.body, ts: content.ts || Date.now(), id: content.id, file: content.file, replyTo: content.replyTo });
-  if (content.from !== me) {
+  if (!isG) ensureContact(sender === me ? content.to : sender);
+  const dir = sender === me ? "out" : "in";
+  pushMessage(convKey, { dir, sender, body: content.body, ts: content.ts || Date.now(), id: content.id, file: content.file, replyTo: content.replyTo });
+  if (sender !== me) {
     state.stats.recv++; updateStats();
-    const muted = state.muted.has(peer);
-    if (state.active !== peer) bumpUnread(peer);
-    if (!muted && (state.active !== peer || document.hidden)) {
+    const muted = state.muted.has(convKey);
+    if (state.active !== convKey) bumpUnread(convKey);
+    if (!muted && (state.active !== convKey || document.hidden)) {
       beep();
-      if (state.active !== peer) toast(`new message from ${peer}`);
+      if (state.active !== convKey) toast(isG ? `${sender} in ${content.g.name}` : `new message from ${sender}`);
     }
   }
 }
 
 // find a message by id within a conversation
-function findMsg(peer, id) { const arr = state.convos.get(peer); return arr ? arr.find((m) => m.id === id) : null; }
+function findMsg(key, id) { const arr = state.convos.get(key); return arr ? arr.find((m) => m.id === id) : null; }
 
-function applyReaction(peer, c) {
-  const m = findMsg(peer, c.target); if (!m) return;
+function applyReaction(key, c) {
+  const m = findMsg(key, c.target); if (!m) return;
   const who = c.from; const emoji = String(c.emoji || "").slice(0, 8); if (!emoji) return;
   m.reactions = m.reactions || {};
   let arr = m.reactions[emoji] || [];
   if (c.remove) arr = arr.filter((h) => h !== who);
   else if (!arr.includes(who)) arr.push(who);
   if (arr.length) m.reactions[emoji] = arr; else delete m.reactions[emoji];
-  if (state.active === peer) renderMessages();
+  if (state.active === key) renderMessages();
   scheduleSaveConvos();
 }
-function applyUnsend(peer, c) {
-  const m = findMsg(peer, c.target); if (!m) return;
-  // only the original sender may retract: peer can delete "in" messages, my own
-  // devices can delete "out" messages.
-  const senderIsPeer = m.dir === "in"; const fromPeer = c.from === peer;
-  if ((senderIsPeer && !fromPeer) || (!senderIsPeer && fromPeer)) return;
+function applyUnsend(key, c) {
+  const m = findMsg(key, c.target); if (!m) return;
+  // only the original sender may retract their own message
+  const origin = m.sender || (m.dir === "out" ? state.user : null);
+  if (origin && c.from !== origin) return;
   m.deleted = true; delete m.file; delete m.reactions; delete m.replyTo; m.body = "";
-  if (state.active === peer) renderMessages();
+  if (state.active === key) renderMessages();
   scheduleSaveConvos();
 }
 
@@ -465,26 +492,30 @@ function sendToCard(card, content) {
 // Fan a content object out to every recipient device and every own device,
 // then record it locally. `extra` carries anything beyond the plain body
 // (e.g. a file attachment descriptor).
-// Low-level fan-out of any content object to a peer's devices and our own.
-// Returns {ok, id}. Does NOT touch local state - callers update it themselves.
-async function fanOut(target, content) {
-  await fetchBundle(target, { silent: true, noSave: true });
+// Fan any content out to the recipients of a conversation (the one peer for a
+// 1:1 chat, or every group member) plus our own other devices. The message is
+// tagged with `to` (1:1) or `g` (group) so the receiver keys it correctly.
+async function fanOutConv(convKey, content) {
   await loadMyBundle();
-  const bundle = state.contacts.get(target);
-  if (!bundle || !bundle.length) return { ok: false };
-  const full = { v: 1, from: state.user, to: target, id: randHex(8), ts: Date.now(), ...content };
+  const g = groupOfKey(convKey);
+  const handles = g ? (g.members || []).filter((h) => h !== state.user) : [convKey];
+  const tag = g ? { g: { id: g.id, name: g.name, members: g.members } } : { to: convKey };
+  const full = { v: 1, from: state.user, id: randHex(8), ts: Date.now(), ...tag, ...content };
   let ok = false;
-  for (const card of bundle) if (sendToCard(card, full)) ok = true;
   const mine = toB64(state.identity.card.mailbox);
+  for (const h of handles) {
+    await fetchBundle(h, { silent: true, noSave: true });
+    for (const card of (state.contacts.get(h) || [])) if (sendToCard(card, full)) ok = true;
+  }
   for (const card of state.myBundle) if (toB64(card.mailbox) !== mine) sendToCard(card, full);
   state.seen.add(full.id); // ignore our own echo when it loops back
   return { ok, id: full.id, ts: full.ts };
 }
-async function deliverContent(target, body, extra = {}) {
-  const r = await fanOut(target, { t: "msg", body, ...extra });
-  if (!r.ok) { toast(state.contacts.get(target)?.length ? "send failed" : "contact has no devices online"); return false; }
-  pushMessage(target, { dir: "out", body, ts: r.ts, id: r.id, file: extra.file, replyTo: extra.replyTo });
+async function deliverContent(convKey, body, extra = {}) {
+  const r = await fanOutConv(convKey, { t: "msg", body, ...extra });
+  pushMessage(convKey, { dir: "out", sender: state.user, body, ts: r.ts, id: r.id, file: extra.file, replyTo: extra.replyTo });
   state.stats.sent++; updateStats();
+  if (!r.ok) toast("sent, but no devices reachable yet");
   return true;
 }
 async function sendMessage() {
@@ -496,28 +527,28 @@ async function sendMessage() {
 }
 
 // ---------- per-message actions: react, reply, delete ----------
-function toggleReaction(peer, msg, emoji) {
+function toggleReaction(key, msg, emoji) {
   msg.reactions = msg.reactions || {};
   const arr = msg.reactions[emoji] || [];
   const had = arr.includes(state.user);
-  // optimistic local update
-  applyReaction(peer, { from: state.user, target: msg.id, emoji, remove: had });
-  fanOut(peer, { t: "react", target: msg.id, emoji, remove: had });
+  applyReaction(key, { from: state.user, target: msg.id, emoji, remove: had }); // optimistic
+  fanOutConv(key, { t: "react", target: msg.id, emoji, remove: had });
 }
-function deleteForMe(peer, msg) {
-  const arr = state.convos.get(peer); if (!arr) return;
+function deleteForMe(key, msg) {
+  const arr = state.convos.get(key); if (!arr) return;
   const i = arr.indexOf(msg); if (i >= 0) arr.splice(i, 1);
-  if (state.active === peer) renderMessages();
+  if (state.active === key) renderMessages();
   scheduleSaveConvos();
 }
-function deleteForEveryone(peer, msg) {
-  applyUnsend(peer, { from: state.user, target: msg.id }); // local
-  fanOut(peer, { t: "unsend", target: msg.id });
+function deleteForEveryone(key, msg) {
+  applyUnsend(key, { from: state.user, target: msg.id }); // local
+  fanOutConv(key, { t: "unsend", target: msg.id });
   toast("message deleted for everyone");
 }
-function startReply(peer, msg) {
+function startReply(key, msg) {
   const preview = msg.deleted ? "" : (msg.file ? (String(msg.file.mime || "").startsWith("image/") ? "🖼 image" : "📄 " + (msg.file.name || "file")) : String(msg.body || "").slice(0, 120));
-  state.replyingTo = { id: msg.id, from: msg.dir === "out" ? state.user : peer, preview };
+  const fromH = msg.sender || (msg.dir === "out" ? state.user : key);
+  state.replyingTo = { id: msg.id, from: fromH, preview };
   const bar = $("#reply-bar"); if (bar) { bar.hidden = false; $("#reply-preview").textContent = (state.replyingTo.from === state.user ? "You: " : state.replyingTo.from + ": ") + preview; }
   const mi = $("#msg-input"); if (mi) mi.focus();
 }
@@ -605,10 +636,12 @@ function pushMessage(handle, msg) {
   scheduleSaveConvos();
 }
 function setActive(handle) {
-  state.active = handle; $("#chat-empty").hidden = true; $("#chat-view").hidden = false; $("#chat-with").textContent = handle;
+  state.active = handle; $("#chat-empty").hidden = true; $("#chat-view").hidden = false;
+  const g = groupOfKey(handle);
+  $("#chat-with").textContent = g ? g.name : handle;
   clearUnread(handle);
   renderContacts(); renderMessages(); updateChatHeadPresence(); setMobileView("chat");
-  pollPresence();
+  if (!g) pollPresence();
   const mi = $("#msg-input"); if (mi) mi.focus();
 }
 function bumpUnread(handle) { state.unread.set(handle, (state.unread.get(handle) || 0) + 1); renderContacts(); }
@@ -622,23 +655,34 @@ function setMobileView(view) { const app = $("#app"); if (app) app.dataset.view 
 function renderContacts() {
   const el = $("#contacts");
   const handles = [...state.contacts.keys()];
-  if (!handles.length) {
-    el.innerHTML = `<div class="net-note" style="padding:12px">No contacts yet. Add someone by their handle above.</div>`;
-  } else {
-    el.innerHTML = handles.map((h) => {
-      const unread = state.unread.get(h) || 0;
-      const badge = unread ? `<span class="badge">${unread > 99 ? "99+" : unread}</span>` : "";
-      const muteIcon = state.muted.has(h) ? `<span class="mini-icon" title="muted">🔕</span>` : "";
-      const on = state.presence.get(h);
-      const dot = `<span class="dot ${on ? "on" : "off"}" title="${on ? "online" : "offline"}"></span>`;
-      return `<div class="contact ${h === state.active ? "active" : ""} ${unread ? "has-unread" : ""}" data-h="${esc(h)}">
-        <div class="avatar">${esc(h[0] || "?").toUpperCase()}${dot}</div>
-        <div class="c-main"><div class="h">${esc(h)} ${muteIcon}</div><div class="s">${on ? "online" : "offline"}</div></div>
-        ${badge}
-        <button class="row-menu" data-menu="${esc(h)}" title="Options" aria-label="Options">⋮</button>
-      </div>`;
-    }).join("");
+  const groups = [...state.groups.values()];
+  let html = "";
+  for (const g of groups) {
+    const key = "g:" + g.id;
+    const unread = state.unread.get(key) || 0;
+    const badge = unread ? `<span class="badge">${unread > 99 ? "99+" : unread}</span>` : "";
+    const muteIcon = state.muted.has(key) ? `<span class="mini-icon" title="muted">🔕</span>` : "";
+    html += `<div class="contact ${key === state.active ? "active" : ""} ${unread ? "has-unread" : ""}" data-h="${esc(key)}">
+      <div class="avatar group">👥</div>
+      <div class="c-main"><div class="h">${esc(g.name)} ${muteIcon}</div><div class="s">${(g.members || []).length} members</div></div>
+      ${badge}
+      <button class="row-menu" data-menu="${esc(key)}" title="Options" aria-label="Options">⋮</button>
+    </div>`;
   }
+  for (const h of handles) {
+    const unread = state.unread.get(h) || 0;
+    const badge = unread ? `<span class="badge">${unread > 99 ? "99+" : unread}</span>` : "";
+    const muteIcon = state.muted.has(h) ? `<span class="mini-icon" title="muted">🔕</span>` : "";
+    const on = state.presence.get(h);
+    const dot = `<span class="dot ${on ? "on" : "off"}" title="${on ? "online" : "offline"}"></span>`;
+    html += `<div class="contact ${h === state.active ? "active" : ""} ${unread ? "has-unread" : ""}" data-h="${esc(h)}">
+      <div class="avatar">${esc(h[0] || "?").toUpperCase()}${dot}</div>
+      <div class="c-main"><div class="h">${esc(h)} ${muteIcon}</div><div class="s">${on ? "online" : "offline"}</div></div>
+      ${badge}
+      <button class="row-menu" data-menu="${esc(h)}" title="Options" aria-label="Options">⋮</button>
+    </div>`;
+  }
+  el.innerHTML = html || `<div class="net-note" style="padding:12px">No contacts yet. Add someone by their handle above.</div>`;
   el.querySelectorAll(".contact").forEach((n) => n.addEventListener("click", (e) => {
     if (e.target.closest(".row-menu")) return; // menu button handled separately
     setActive(n.dataset.h);
@@ -686,6 +730,28 @@ function unblock(handle) {
   state.blocked.delete(handle); savePrefs(); uploadContactsBlob(); renderContacts();
   toast(`unblocked ${handle}`);
 }
+function leaveGroup(key) {
+  const g = groupOfKey(key); if (!g) return;
+  state.groups.delete(g.id); state.convos.delete(key); state.unread.delete(key); state.muted.delete(key);
+  if (state.active === key) { state.active = null; $("#chat-view").hidden = true; $("#chat-empty").hidden = false; setMobileView("list"); }
+  saveContactsLocal(); savePrefs(); uploadContactsBlob(); scheduleSaveConvos(); renderContacts();
+  toast(`left ${g.name}`);
+}
+
+// ---------- group creation ----------
+async function createGroup(name, members) {
+  const id = randHex(8);
+  const all = [...new Set([state.user, ...members])];
+  const g = { id, name: String(name).slice(0, 60) || "group", members: all };
+  state.groups.set(id, g);
+  // make sure we hold every member's device cards so we can fan out to them
+  for (const h of members) if (!state.contacts.has(h)) await fetchBundle(h, { silent: true, noSave: true });
+  saveContactsLocal(); uploadContactsBlob(); renderContacts();
+  setActive("g:" + id);
+  // announce the group so members create it on their side (empty greeting)
+  fanOutConv("g:" + id, { t: "msg", body: "" }).then((r) => { if (r) { /* announced */ } });
+  toast(`group "${g.name}" created`);
+}
 
 // ---------- small popup menu ----------
 function closeMenus() { document.querySelectorAll(".menu-pop.open").forEach((m) => { m.classList.remove("open"); m.hidden = true; }); }
@@ -695,8 +761,12 @@ function buildMenu(pop, handle, { includeClear = false } = {}) {
     { label: muted ? "🔔 Unmute" : "🔕 Mute", act: () => toggleMute(handle) },
   ];
   if (includeClear) items.push({ label: "🧹 Clear messages", act: () => clearMessages(handle) });
-  items.push({ label: "🚫 Block", act: () => block(handle), danger: true });
-  items.push({ label: "🗑 Delete chat", act: () => deleteChat(handle), danger: true });
+  if (isGroupKey(handle)) {
+    items.push({ label: "🚪 Leave group", act: () => leaveGroup(handle), danger: true });
+  } else {
+    items.push({ label: "🚫 Block", act: () => block(handle), danger: true });
+    items.push({ label: "🗑 Delete chat", act: () => deleteChat(handle), danger: true });
+  }
   pop.innerHTML = "";
   for (const it of items) {
     const b = document.createElement("button");
@@ -737,10 +807,12 @@ function reactionsHtml(m) {
 }
 function renderMessages() {
   const el = $("#messages"); const msgs = state.convos.get(state.active) || [];
+  const inGroup = isGroupKey(state.active);
   el.innerHTML = msgs.map((m, i) => {
     const time = new Date(m.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     if (m.deleted) return `<div class="msg ${m.dir} deleted" data-mi="${i}"><span class="del-note">🚫 message deleted</span><span class="t">${time}</span></div>`;
     let inner = "";
+    if (inGroup && m.dir === "in" && m.sender) inner += `<div class="msg-sender">${esc(m.sender)}</div>`;
     if (m.replyTo) inner += `<div class="reply-quote"><b>${esc(m.replyTo.from === state.user ? "You" : m.replyTo.from)}</b>${esc(m.replyTo.preview || "")}</div>`;
     inner += m.body ? esc(m.body) : "";
     if (m.file) {
@@ -830,10 +902,35 @@ function buildNetViz() {
 }
 function pulseHop(label) { let col = -1; const m = /^mix-L(\d+)/.exec(label); if (m) col = Number(m[1]); else if (label.startsWith("provider")) col = state.net.layers.length; const node = state.netCols[col]; if (!node) return; node.classList.add("pulse"); setTimeout(() => node.classList.remove("pulse"), 320); }
 
+// ---------- new-group dialog ----------
+function openGroupModal() {
+  const modal = $("#group-modal"); if (!modal) return;
+  const contacts = [...state.contacts.keys()];
+  const box = $("#group-members");
+  box.innerHTML = contacts.length
+    ? contacts.map((h) => `<label class="gm-row"><input type="checkbox" value="${esc(h)}"><span>${esc(h)}</span></label>`).join("")
+    : `<div class="net-note">Add some contacts first, then group them here.</div>`;
+  $("#group-name").value = ""; $("#group-err").hidden = true;
+  modal.hidden = false; $("#group-name").focus();
+}
+function closeGroupModal() { const m = $("#group-modal"); if (m) m.hidden = true; }
+async function submitGroup() {
+  const name = $("#group-name").value.trim();
+  const members = [...$("#group-members").querySelectorAll("input:checked")].map((i) => i.value);
+  const err = $("#group-err");
+  if (!name) { err.textContent = "Give the group a name."; err.hidden = false; return; }
+  if (members.length < 1) { err.textContent = "Pick at least one member."; err.hidden = false; return; }
+  closeGroupModal();
+  await createGroup(name, members);
+}
+
 // ---------- wire ui ----------
 function wireUI() {
   $("#add-go").addEventListener("click", () => { fetchBundle($("#add-handle").value, { silent: false }); $("#add-handle").value = ""; });
   $("#add-handle").addEventListener("keydown", (e) => { if (e.key === "Enter") { fetchBundle($("#add-handle").value, { silent: false }); $("#add-handle").value = ""; } });
+  const ng = $("#new-group"); if (ng) ng.addEventListener("click", openGroupModal);
+  const gc = $("#group-cancel"); if (gc) gc.addEventListener("click", closeGroupModal);
+  const gcr = $("#group-create"); if (gcr) gcr.addEventListener("click", submitGroup);
   $("#msg-send").addEventListener("click", sendMessage);
   $("#msg-input").addEventListener("keydown", (e) => e.key === "Enter" && sendMessage());
   const cover = $("#cover-toggle"); cover.addEventListener("click", toggleCover); cover.textContent = "cover: " + (state.coverOn ? "on" : "off"); cover.classList.toggle("on", state.coverOn);
