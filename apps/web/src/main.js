@@ -218,7 +218,7 @@ function startApp() {
   connectWS(); wireUI(); renderContacts(); updateNetPanel();
   pollPresence(); if (!state.presenceTimer) state.presenceTimer = setInterval(pollPresence, 15000);
   sweepExpiredImages();
-  if (!state.expireTimer) state.expireTimer = setInterval(() => { sweepExpiredImages(); if (state.active && (state.convos.get(state.active) || []).some((m) => m.file && m.file.expireAt && !m.expired)) renderMessages(); }, 5000);
+  if (!state.expireTimer) state.expireTimer = setInterval(() => { sweepExpiredImages(); updateExpiryTimers(); }, 5000);
 }
 
 // ---- presence (online/offline) ----
@@ -557,6 +557,11 @@ function clearReply() { state.replyingTo = null; const bar = $("#reply-bar"); if
 
 // ---------- file attachments (encrypted; server stores only ciphertext) ----------
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
+// map extensions to a mime when the browser gives us none (common for .mov)
+const MEDIA_EXT = { mov: "video/quicktime", mp4: "video/mp4", m4v: "video/mp4", webm: "video/webm", ogv: "video/ogg", mkv: "video/x-matroska", mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav", ogg: "audio/ogg", oga: "audio/ogg", aac: "audio/aac", flac: "audio/flac", opus: "audio/ogg" };
+function fileMime(file) { if (file.type) return file.type; const ext = (file.name.split(".").pop() || "").toLowerCase(); return MEDIA_EXT[ext] || "application/octet-stream"; }
+// which inline preview a mime gets: image, video, audio, or "" (download only)
+function mimeKind(mime) { const m = String(mime || ""); return m.startsWith("image/") ? "image" : m.startsWith("video/") ? "video" : m.startsWith("audio/") ? "audio" : ""; }
 async function encryptBytes(keyRaw, bytes) {
   const key = await crypto.subtle.importKey("raw", keyRaw, { name: "AES-GCM" }, false, ["encrypt"]);
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -577,18 +582,19 @@ async function sendFile(file, expireSec = 0) {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const keyRaw = crypto.getRandomValues(new Uint8Array(32));
     const enc = await encryptBytes(keyRaw, bytes);
-    const headers = { "content-type": "application/octet-stream", "x-file-type": file.type || "application/octet-stream" };
+    const mime = fileMime(file);
+    const headers = { "content-type": "application/octet-stream", "x-file-type": mime };
     if (expireSec > 0) headers["x-expire-sec"] = String(expireSec);
     const r = await fetch(`/api/upload?token=${encodeURIComponent(state.token)}`, { method: "POST", headers, body: enc });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j.id) { toast(j.error || "upload failed"); return; }
-    const fileMeta = { name: file.name.slice(0, 120), mime: file.type || "application/octet-stream", size: file.size, id: j.id, key: toB64(keyRaw) };
+    const fileMeta = { name: file.name.slice(0, 120), mime, size: file.size, id: j.id, key: toB64(keyRaw) };
     if (expireSec > 0) fileMeta.expireAt = Date.now() + expireSec * 1000;
     await deliverContent(target, "", { file: fileMeta });
   } catch { toast("could not send file"); }
 }
 
-// Auto-delete durations offered for image attachments.
+// Auto-delete durations offered for media attachments (image / video / audio).
 const EXPIRE_OPTS = [
   { label: "Keep", sec: 0 },
   { label: "10 seconds", sec: 10 },
@@ -597,12 +603,13 @@ const EXPIRE_OPTS = [
   { label: "1 hour", sec: 3600 },
   { label: "1 day", sec: 86400 },
 ];
-// When an image is picked, ask how long it should live before sending.
-function askImageExpiry(file, anchor) {
+// When a media file is picked, ask how long it should live before sending.
+function askMediaExpiry(file, anchor) {
+  const noun = mimeKind(fileMime(file)) || "file";
   const existing = document.getElementById("expire-pop");
   const pop = existing || Object.assign(document.createElement("div"), { id: "expire-pop", className: "menu-pop" });
   if (!existing) document.body.appendChild(pop);
-  pop.innerHTML = `<div class="menu-head">Auto-delete image</div>`;
+  pop.innerHTML = `<div class="menu-head">Auto-delete ${noun}</div>`;
   for (const o of EXPIRE_OPTS) {
     const b = document.createElement("button"); b.className = "menu-item"; b.textContent = o.sec ? "🕓 " + o.label : "♾ " + o.label;
     b.addEventListener("click", (e) => { e.stopPropagation(); closeMenus(); sendFile(file, o.sec); });
@@ -620,11 +627,20 @@ function sweepExpiredImages() {
   for (const [, arr] of state.convos) {
     for (const m of arr) {
       if (m.file && m.file.expireAt && !m.expired && Date.now() > m.file.expireAt) {
-        m.expired = true; m.file = { name: m.file.name, expired: true }; changed = true;
+        m.expired = true; m.file = { name: m.file.name, expired: true, kind: mimeKind(m.file.mime) || "file" }; changed = true;
       }
     }
   }
   if (changed) { if (state.active) renderMessages(); scheduleSaveConvos(); }
+}
+// Update the countdown text on still-unloaded media placeholders in place, so we
+// don't re-render (and interrupt) a video/audio the user is currently playing.
+function updateExpiryTimers() {
+  const list = document.getElementById("messages"); if (!list) return;
+  for (const node of list.querySelectorAll(".att-media[data-exp] .att-timer")) {
+    const exp = Number(node.closest(".att-media").dataset.exp);
+    if (exp) node.textContent = "🕓 " + fmtRemaining(exp - Date.now());
+  }
 }
 
 // ---------- state + render ----------
@@ -818,16 +834,17 @@ function renderMessages() {
     if (m.replyTo) inner += `<div class="reply-quote"><b>${esc(m.replyTo.from === state.user ? "You" : m.replyTo.from)}</b>${esc(m.replyTo.preview || "")}</div>`;
     inner += m.body ? esc(m.body) : "";
     if (m.file) {
-      const f = m.file; const isImg = String(f.mime || "").startsWith("image/");
-      if (f.expired) inner += `<div class="att att-expired">🕓 image deleted</div>`;
-      else if (isImg) {
+      const f = m.file; const kind = f.kind || mimeKind(f.mime);
+      if (f.expired) inner += `<div class="att att-expired">🕓 ${esc(f.kind || "media")} deleted</div>`;
+      else if (kind === "image" || kind === "video" || kind === "audio") {
         const exp = f.expireAt ? `<span class="att-timer" title="auto-deletes">🕓 ${fmtRemaining(f.expireAt - Date.now())}</span>` : "";
-        inner += `<div class="att att-img" data-mi="${i}"><div class="att-ph">🖼 ${esc(f.name)} · tap to load ${exp}</div></div>` + (m.body ? `<div class="att-cap">${esc(m.body)}</div>` : "");
+        const ic = kind === "video" ? "🎬" : kind === "audio" ? "🎵" : "🖼";
+        inner += `<div class="att att-media att-${kind}" data-mi="${i}"${f.expireAt ? ` data-exp="${f.expireAt}"` : ""}><div class="att-ph">${ic} ${esc(f.name)} · tap to load ${exp}</div></div>` + (m.body ? `<div class="att-cap">${esc(m.body)}</div>` : "");
       } else inner += `<div class="att att-file" data-mi="${i}"><span class="att-ic">📄</span><span class="att-meta"><b>${esc(f.name)}</b><span>${fmtSize(f.size)} · tap to download</span></span></div>` + (m.body ? `<div class="att-cap">${esc(m.body)}</div>` : "");
     }
     return `<div class="msg ${m.dir}" data-mi="${i}">${inner}<span class="t">${time}</span>${reactionsHtml(m)}</div>`;
   }).join("");
-  el.querySelectorAll(".att").forEach((a) => a.addEventListener("click", (e) => { e.stopPropagation(); openAttachment(msgs[Number(a.dataset.mi)], a); }));
+  el.querySelectorAll(".att").forEach((a) => a.addEventListener("click", (e) => { e.stopPropagation(); if (a.dataset.loaded) return; openAttachment(msgs[Number(a.dataset.mi)], a); }));
   el.querySelectorAll(".rc").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); toggleReaction(state.active, msgs[Number(b.closest(".msg").dataset.mi)], b.dataset.emoji); }));
   el.querySelectorAll(".msg").forEach((n) => n.addEventListener("click", (e) => { if (e.target.closest(".att,.rc,.reply-quote")) return; e.stopPropagation(); openMessageMenu(state.active, msgs[Number(n.dataset.mi)], n); }));
   el.scrollTop = el.scrollHeight;
@@ -868,9 +885,11 @@ async function openAttachment(m, node) {
     const bytes = await decryptBytes(fromB64(f.key), buf);
     const blob = new Blob([bytes], { type: f.mime || "application/octet-stream" });
     const urlObj = URL.createObjectURL(blob);
-    if (String(f.mime || "").startsWith("image/")) {
-      node.innerHTML = `<img src="${urlObj}" alt="${esc(f.name)}">`;
-    } else {
+    const kind = mimeKind(f.mime);
+    if (kind === "image") { node.innerHTML = `<img src="${urlObj}" alt="${esc(f.name)}">`; node.dataset.loaded = "1"; }
+    else if (kind === "video") { node.innerHTML = `<video src="${urlObj}" controls playsinline preload="metadata"></video>`; node.dataset.loaded = "1"; }
+    else if (kind === "audio") { node.innerHTML = `<div class="att-audio"><div class="att-audio-name">🎵 ${esc(f.name)}</div><audio src="${urlObj}" controls preload="metadata"></audio></div>`; node.dataset.loaded = "1"; }
+    else {
       const a = document.createElement("a"); a.href = urlObj; a.download = f.name || "file"; a.click();
       setTimeout(() => URL.revokeObjectURL(urlObj), 10000);
     }
@@ -1106,8 +1125,8 @@ function wireUI() {
     fi.addEventListener("change", () => {
       const f = fi.files && fi.files[0]; fi.value = "";
       if (!f) return;
-      // Images get an auto-delete choice; other files send straight away.
-      if (String(f.type || "").startsWith("image/")) askImageExpiry(f, ab);
+      // Media (image / video / audio) gets an auto-delete choice; other files send straight away.
+      if (mimeKind(fileMime(f))) askMediaExpiry(f, ab);
       else sendFile(f, 0);
     });
   }
