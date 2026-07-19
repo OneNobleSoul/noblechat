@@ -87,6 +87,17 @@ input{font-family:var(--sans)}
 .msg .t{display:block;font-size:10px;opacity:.6;margin-top:4px;font-family:var(--mono)}
 .composer{display:flex;gap:10px;padding:14px max(20px,calc((100% - var(--chat-col))/2));border-top:1px solid var(--line)}
 .composer input{flex:1;background:#080b11;border:1px solid var(--line);border-radius:12px;color:var(--text);padding:12px 14px;font-size:14.5px}
+.emoji-wrap{position:relative;display:flex;align-items:center}
+#emoji-btn{font-size:22px}
+.emoji-pop{position:absolute;bottom:calc(100% + 8px);left:0;z-index:70;width:288px;max-height:220px;overflow-y:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px;box-shadow:0 24px 60px -24px #000;display:grid;grid-template-columns:repeat(8,1fr);gap:2px}
+.emoji-pop[hidden]{display:none!important}
+.emoji-pop .emoji{background:transparent;border:0;font-size:20px;line-height:1;padding:5px;border-radius:7px;cursor:pointer}
+.emoji-pop .emoji:hover{background:var(--panel-2)}
+/* transport tag + dimmed mix diagram (shown over Nym) */
+.net-title{display:flex;align-items:center;justify-content:space-between}
+.net-transport{font-family:var(--mono);font-size:9.5px;letter-spacing:1px;color:var(--dim);border:1px solid var(--line);border-radius:999px;padding:2px 7px}
+.net-transport.on{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
+.net-layers.dim{opacity:.32;filter:grayscale(.6)}
 .composer input:focus{outline:none;border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
 
 .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(16px);z-index:40;background:#0c111a;border:1px solid var(--line);color:var(--text);font-family:var(--mono);font-size:13px;padding:11px 18px;border-radius:10px;opacity:0;transition:.25s}

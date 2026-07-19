@@ -214,7 +214,7 @@ function startApp() {
   $("#app").hidden = false;
   $("#me-handle").textContent = state.user;
   setMobileView("list");
-  connectWS(); wireUI(); renderContacts();
+  connectWS(); wireUI(); renderContacts(); updateNetPanel();
   pollPresence(); if (!state.presenceTimer) state.presenceTimer = setInterval(pollPresence, 15000);
 }
 
@@ -624,10 +624,27 @@ function wireUI() {
   const back = $("#chat-back"); if (back) back.addEventListener("click", () => setMobileView("list"));
   const cmenu = $("#chat-menu"); if (cmenu) cmenu.addEventListener("click", (e) => { e.stopPropagation(); openChatMenu(); });
   const btgl = $("#blocked-toggle"); if (btgl) btgl.addEventListener("click", () => { const l = $("#blocked-list"); l.hidden = !l.hidden; });
-  document.addEventListener("click", (e) => { if (!e.target.closest(".menu-pop") && !e.target.closest(".row-menu") && !e.target.closest("#chat-menu")) closeMenus(); });
+  wireEmoji();
+  document.addEventListener("click", (e) => { if (!e.target.closest(".menu-pop") && !e.target.closest(".row-menu") && !e.target.closest("#chat-menu")) closeMenus(); if (!e.target.closest(".emoji-wrap")) closeEmoji(); });
   window.addEventListener("focus", () => { if (state.active) clearUnread(state.active); });
   updateStats();
 }
+// ---------- emoji picker ----------
+const EMOJI = "😀 😃 😄 😁 😆 😅 😂 🤣 🙂 🙃 😉 😊 😇 🥰 😍 😘 😗 😋 😛 😜 🤪 😎 🤩 🥳 😏 😒 😞 😔 😟 😕 🙁 😣 😖 😫 😩 🥺 😢 😭 😤 😠 😡 🤬 🤯 😳 🥵 🥶 😱 😨 😰 😥 🤔 🤗 🤭 🤫 😐 😑 😶 😬 🙄 😴 🤤 😷 🤒 🤕 🤢 🥴 😵 🤠 🤡 👍 👎 👌 🤌 🤞 🤟 🤙 👋 🙏 💪 🔥 ✨ ⭐ 🎉 🎊 💯 ❤️ 🧡 💛 💚 💙 💜 🖤 🤍 💔 💖 👀 🚀 😈 💀 👻 🤖 🎁 ☕ 🍺 🍕".split(" ").filter(Boolean);
+function closeEmoji() { const p = $("#emoji-pop"); if (p) { p.hidden = true; p.classList.remove("open"); } }
+function wireEmoji() {
+  const btn = $("#emoji-btn"), pop = $("#emoji-pop"); if (!btn || !pop) return;
+  if (!pop.dataset.built) { pop.innerHTML = EMOJI.map((e) => `<button type="button" class="emoji">${e}</button>`).join(""); pop.dataset.built = "1"; }
+  pop.querySelectorAll(".emoji").forEach((b) => b.addEventListener("click", () => insertAtCursor($("#msg-input"), b.textContent)));
+  btn.addEventListener("click", (e) => { e.stopPropagation(); const open = pop.classList.contains("open"); closeEmoji(); if (!open) { pop.hidden = false; pop.classList.add("open"); } });
+}
+function insertAtCursor(input, text) {
+  if (!input) return;
+  const s = input.selectionStart ?? input.value.length, en = input.selectionEnd ?? input.value.length;
+  input.value = input.value.slice(0, s) + text + input.value.slice(en);
+  const pos = s + text.length; input.focus(); try { input.setSelectionRange(pos, pos); } catch { /* */ }
+}
+
 async function logout() {
   try { await fetch("/api/account/logout", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: state.token }) }); } catch { /* */ }
   clearSession(); location.reload();
@@ -636,8 +653,21 @@ async function logout() {
 // ---------- server status: announcements, maintenance, auto-update ----------
 function ensureEl(id, cls, parent) { let el = document.getElementById(id); if (!el) { el = document.createElement("div"); el.id = id; el.className = cls; (parent || document.body).appendChild(el); } return el; }
 async function pollStatus() { try { const r = await fetch("/api/status"); if (r.ok) applyStatus(await r.json()); } catch { /* */ } }
+function updateNetPanel() {
+  const t = state.transport === "nym" ? "nym" : "internal";
+  const title = $("#net-title-text"); const tr = $("#net-transport"); const note = $("#net-note"); const layers = $("#net-layers");
+  if (title) title.textContent = t === "nym" ? "NYM MIXNET" : "MIX NETWORK";
+  if (tr) { tr.textContent = t === "nym" ? "public nym" : "internal"; tr.className = "net-transport " + (t === "nym" ? "on" : ""); }
+  // Our per-hop node animation only reflects the internal fleet; over Nym the
+  // routing happens in the public mixnet and we get no hop events, so show that
+  // honestly instead of a dead diagram.
+  if (layers) layers.classList.toggle("dim", t === "nym");
+  if (note) note.textContent = t === "nym"
+    ? "Routing anonymously through the public Nym mixnet. Sender, timing and route are hidden even from this server."
+    : "Every packet is the same size and equally opaque. The server can't tell a message from cover traffic.";
+}
 function applyStatus(s) {
-  if (s.transport && s.transport !== state.transport) state.transport = s.transport;
+  if (s.transport && s.transport !== state.transport) { state.transport = s.transport; updateNetPanel(); }
   if (typeof s.nymAddress === "string") state.nymAddress = s.nymAddress;
   if (state.transport === "nym") ensureNymClient();
   if (s.version) { if (state.version && s.version !== state.version) offerUpdate(); else if (!state.version) state.version = s.version; }
