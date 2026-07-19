@@ -66,7 +66,7 @@ const MIME = {
 };
 const CSP = [
   "default-src 'self'", "base-uri 'self'", "object-src 'none'", "frame-ancestors 'none'",
-  "img-src 'self' data: blob:", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "img-src 'self' data: blob:", "media-src 'self' blob:", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com",
   // 'wasm-unsafe-eval' lets the lazily-loaded nym transport instantiate its
   // WebAssembly mix client; it does not permit JS eval.
