@@ -24,7 +24,8 @@ const state = {
   seen: new Set(), version: null, maintenance: false, statusTimer: null, authMode: "login",
   transport: "internal", nymAddress: null,
   soundOn: true, muted: new Set(), blocked: new Set(), unread: new Map(),
-  presence: new Map(), presenceTimer: null, histTimer: null,
+  presence: new Map(), presenceTimer: null, histTimer: null, expireTimer: null,
+  replyingTo: null,
 };
 
 const ls = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* */ } }, del: (k) => { try { localStorage.removeItem(k); } catch { /* */ } } };
@@ -346,26 +347,54 @@ function connectWS() {
 function onDeliver(envelope) {
   let content; try { content = openIncoming(state.identity, envelope); } catch { return; }
   if (content.t === "cover") return;
-  if (content.t !== "msg") return;
   if (content.id && state.seen.has(content.id)) return;
   if (content.id) state.seen.add(content.id);
   const me = state.user;
-  if (content.from === me) {
-    const peer = content.to || "unknown"; ensureContact(peer);
-    pushMessage(peer, { dir: "out", body: content.body, ts: content.ts || Date.now(), id: content.id, file: content.file });
-  } else {
-    const from = content.from || "unknown";
-    if (state.blocked.has(from)) return; // blocked sender: drop silently
-    ensureContact(from);
-    pushMessage(from, { dir: "in", body: content.body, ts: content.ts || Date.now(), id: content.id, file: content.file });
+  const peer = content.from === me ? (content.to || "unknown") : (content.from || "unknown");
+  if (content.from !== me && state.blocked.has(peer)) return; // blocked sender: drop
+
+  // reactions and unsend act on an existing message rather than adding one
+  if (content.t === "react") { applyReaction(peer, content); return; }
+  if (content.t === "unsend") { applyUnsend(peer, content); return; }
+  if (content.t !== "msg") return;
+
+  ensureContact(peer);
+  const dir = content.from === me ? "out" : "in";
+  pushMessage(peer, { dir, body: content.body, ts: content.ts || Date.now(), id: content.id, file: content.file, replyTo: content.replyTo });
+  if (content.from !== me) {
     state.stats.recv++; updateStats();
-    const muted = state.muted.has(from);
-    if (state.active !== from) bumpUnread(from);
-    if (!muted && (state.active !== from || document.hidden)) {
+    const muted = state.muted.has(peer);
+    if (state.active !== peer) bumpUnread(peer);
+    if (!muted && (state.active !== peer || document.hidden)) {
       beep();
-      if (state.active !== from) toast(`new message from ${from}`);
+      if (state.active !== peer) toast(`new message from ${peer}`);
     }
   }
+}
+
+// find a message by id within a conversation
+function findMsg(peer, id) { const arr = state.convos.get(peer); return arr ? arr.find((m) => m.id === id) : null; }
+
+function applyReaction(peer, c) {
+  const m = findMsg(peer, c.target); if (!m) return;
+  const who = c.from; const emoji = String(c.emoji || "").slice(0, 8); if (!emoji) return;
+  m.reactions = m.reactions || {};
+  let arr = m.reactions[emoji] || [];
+  if (c.remove) arr = arr.filter((h) => h !== who);
+  else if (!arr.includes(who)) arr.push(who);
+  if (arr.length) m.reactions[emoji] = arr; else delete m.reactions[emoji];
+  if (state.active === peer) renderMessages();
+  scheduleSaveConvos();
+}
+function applyUnsend(peer, c) {
+  const m = findMsg(peer, c.target); if (!m) return;
+  // only the original sender may retract: peer can delete "in" messages, my own
+  // devices can delete "out" messages.
+  const senderIsPeer = m.dir === "in"; const fromPeer = c.from === peer;
+  if ((senderIsPeer && !fromPeer) || (!senderIsPeer && fromPeer)) return;
+  m.deleted = true; delete m.file; delete m.reactions; delete m.replyTo; m.body = "";
+  if (state.active === peer) renderMessages();
+  scheduleSaveConvos();
 }
 
 // ---------- transport dispatch ----------
@@ -436,27 +465,63 @@ function sendToCard(card, content) {
 // Fan a content object out to every recipient device and every own device,
 // then record it locally. `extra` carries anything beyond the plain body
 // (e.g. a file attachment descriptor).
-async function deliverContent(target, body, extra = {}) {
+// Low-level fan-out of any content object to a peer's devices and our own.
+// Returns {ok, id}. Does NOT touch local state - callers update it themselves.
+async function fanOut(target, content) {
   await fetchBundle(target, { silent: true, noSave: true });
   await loadMyBundle();
   const bundle = state.contacts.get(target);
-  if (!bundle || !bundle.length) { toast("contact has no devices online"); return false; }
-  const content = { v: 1, t: "msg", from: state.user, to: target, id: randHex(8), body, ts: Date.now(), ...extra };
+  if (!bundle || !bundle.length) return { ok: false };
+  const full = { v: 1, from: state.user, to: target, id: randHex(8), ts: Date.now(), ...content };
   let ok = false;
-  for (const card of bundle) if (sendToCard(card, content)) ok = true;
+  for (const card of bundle) if (sendToCard(card, full)) ok = true;
   const mine = toB64(state.identity.card.mailbox);
-  for (const card of state.myBundle) if (toB64(card.mailbox) !== mine) sendToCard(card, content);
-  if (!ok) { toast("send failed"); return false; }
-  state.seen.add(content.id);
-  pushMessage(target, { dir: "out", body, ts: content.ts, id: content.id, file: extra.file });
+  for (const card of state.myBundle) if (toB64(card.mailbox) !== mine) sendToCard(card, full);
+  state.seen.add(full.id); // ignore our own echo when it loops back
+  return { ok, id: full.id, ts: full.ts };
+}
+async function deliverContent(target, body, extra = {}) {
+  const r = await fanOut(target, { t: "msg", body, ...extra });
+  if (!r.ok) { toast(state.contacts.get(target)?.length ? "send failed" : "contact has no devices online"); return false; }
+  pushMessage(target, { dir: "out", body, ts: r.ts, id: r.id, file: extra.file, replyTo: extra.replyTo });
   state.stats.sent++; updateStats();
   return true;
 }
 async function sendMessage() {
   const input = $("#msg-input"); const body = input.value.trim();
   if (!body || !state.active) return;
-  if (await deliverContent(state.active, body)) input.value = "";
+  const extra = {};
+  if (state.replyingTo) extra.replyTo = state.replyingTo;
+  if (await deliverContent(state.active, body)) { input.value = ""; clearReply(); }
 }
+
+// ---------- per-message actions: react, reply, delete ----------
+function toggleReaction(peer, msg, emoji) {
+  msg.reactions = msg.reactions || {};
+  const arr = msg.reactions[emoji] || [];
+  const had = arr.includes(state.user);
+  // optimistic local update
+  applyReaction(peer, { from: state.user, target: msg.id, emoji, remove: had });
+  fanOut(peer, { t: "react", target: msg.id, emoji, remove: had });
+}
+function deleteForMe(peer, msg) {
+  const arr = state.convos.get(peer); if (!arr) return;
+  const i = arr.indexOf(msg); if (i >= 0) arr.splice(i, 1);
+  if (state.active === peer) renderMessages();
+  scheduleSaveConvos();
+}
+function deleteForEveryone(peer, msg) {
+  applyUnsend(peer, { from: state.user, target: msg.id }); // local
+  fanOut(peer, { t: "unsend", target: msg.id });
+  toast("message deleted for everyone");
+}
+function startReply(peer, msg) {
+  const preview = msg.deleted ? "" : (msg.file ? (String(msg.file.mime || "").startsWith("image/") ? "🖼 image" : "📄 " + (msg.file.name || "file")) : String(msg.body || "").slice(0, 120));
+  state.replyingTo = { id: msg.id, from: msg.dir === "out" ? state.user : peer, preview };
+  const bar = $("#reply-bar"); if (bar) { bar.hidden = false; $("#reply-preview").textContent = (state.replyingTo.from === state.user ? "You: " : state.replyingTo.from + ": ") + preview; }
+  const mi = $("#msg-input"); if (mi) mi.focus();
+}
+function clearReply() { state.replyingTo = null; const bar = $("#reply-bar"); if (bar) bar.hidden = true; }
 
 // ---------- file attachments (encrypted; server stores only ciphertext) ----------
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
@@ -662,23 +727,62 @@ function fmtRemaining(ms) {
   const s = Math.max(0, Math.round(ms / 1000));
   if (s < 60) return s + "s"; if (s < 3600) return Math.round(s / 60) + "m"; if (s < 86400) return Math.round(s / 3600) + "h"; return Math.round(s / 86400) + "d";
 }
+function reactionsHtml(m) {
+  if (!m.reactions) return "";
+  const chips = Object.entries(m.reactions).filter(([, arr]) => arr.length).map(([e, arr]) => {
+    const mine = arr.includes(state.user) ? " mine" : "";
+    return `<button class="rc${mine}" data-emoji="${esc(e)}">${e} ${arr.length}</button>`;
+  }).join("");
+  return chips ? `<div class="reactions">${chips}</div>` : "";
+}
 function renderMessages() {
   const el = $("#messages"); const msgs = state.convos.get(state.active) || [];
   el.innerHTML = msgs.map((m, i) => {
     const time = new Date(m.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    let inner = m.body ? esc(m.body) : "";
+    if (m.deleted) return `<div class="msg ${m.dir} deleted" data-mi="${i}"><span class="del-note">🚫 message deleted</span><span class="t">${time}</span></div>`;
+    let inner = "";
+    if (m.replyTo) inner += `<div class="reply-quote"><b>${esc(m.replyTo.from === state.user ? "You" : m.replyTo.from)}</b>${esc(m.replyTo.preview || "")}</div>`;
+    inner += m.body ? esc(m.body) : "";
     if (m.file) {
       const f = m.file; const isImg = String(f.mime || "").startsWith("image/");
-      if (f.expired) inner = `<div class="att att-expired">🕓 image deleted</div>`;
+      if (f.expired) inner += `<div class="att att-expired">🕓 image deleted</div>`;
       else if (isImg) {
         const exp = f.expireAt ? `<span class="att-timer" title="auto-deletes">🕓 ${fmtRemaining(f.expireAt - Date.now())}</span>` : "";
-        inner = `<div class="att att-img" data-mi="${i}"><div class="att-ph">🖼 ${esc(f.name)} · tap to load ${exp}</div></div>` + (m.body ? `<div class="att-cap">${esc(m.body)}</div>` : "");
-      } else inner = `<div class="att att-file" data-mi="${i}"><span class="att-ic">📄</span><span class="att-meta"><b>${esc(f.name)}</b><span>${fmtSize(f.size)} · tap to download</span></span></div>` + (m.body ? `<div class="att-cap">${esc(m.body)}</div>` : "");
+        inner += `<div class="att att-img" data-mi="${i}"><div class="att-ph">🖼 ${esc(f.name)} · tap to load ${exp}</div></div>` + (m.body ? `<div class="att-cap">${esc(m.body)}</div>` : "");
+      } else inner += `<div class="att att-file" data-mi="${i}"><span class="att-ic">📄</span><span class="att-meta"><b>${esc(f.name)}</b><span>${fmtSize(f.size)} · tap to download</span></span></div>` + (m.body ? `<div class="att-cap">${esc(m.body)}</div>` : "");
     }
-    return `<div class="msg ${m.dir}">${inner}<span class="t">${time}</span></div>`;
+    return `<div class="msg ${m.dir}" data-mi="${i}">${inner}<span class="t">${time}</span>${reactionsHtml(m)}</div>`;
   }).join("");
-  el.querySelectorAll(".att").forEach((a) => a.addEventListener("click", () => openAttachment(msgs[Number(a.dataset.mi)], a)));
+  el.querySelectorAll(".att").forEach((a) => a.addEventListener("click", (e) => { e.stopPropagation(); openAttachment(msgs[Number(a.dataset.mi)], a); }));
+  el.querySelectorAll(".rc").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); toggleReaction(state.active, msgs[Number(b.closest(".msg").dataset.mi)], b.dataset.emoji); }));
+  el.querySelectorAll(".msg").forEach((n) => n.addEventListener("click", (e) => { if (e.target.closest(".att,.rc,.reply-quote")) return; e.stopPropagation(); openMessageMenu(state.active, msgs[Number(n.dataset.mi)], n); }));
   el.scrollTop = el.scrollHeight;
+}
+// popover with quick reactions + reply/copy/delete for a single message
+const QUICK_REACTS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+function openMessageMenu(peer, msg, anchor) {
+  if (!msg) return;
+  const existing = document.getElementById("msg-menu-pop");
+  const pop = existing || Object.assign(document.createElement("div"), { id: "msg-menu-pop", className: "menu-pop" });
+  if (!existing) document.body.appendChild(pop);
+  pop.innerHTML = "";
+  if (!msg.deleted) {
+    const row = document.createElement("div"); row.className = "react-row";
+    for (const e of QUICK_REACTS) { const b = document.createElement("button"); b.className = "react-q"; b.textContent = e; b.addEventListener("click", (ev) => { ev.stopPropagation(); closeMenus(); toggleReaction(peer, msg, e); }); row.appendChild(b); }
+    pop.appendChild(row);
+  }
+  const items = [];
+  if (!msg.deleted) items.push({ label: "↩ Reply", act: () => startReply(peer, msg) });
+  if (!msg.deleted && msg.body) items.push({ label: "📋 Copy", act: () => { try { navigator.clipboard.writeText(msg.body); toast("copied"); } catch { /* */ } } });
+  items.push({ label: "🗑 Delete for me", act: () => deleteForMe(peer, msg), danger: true });
+  if (msg.dir === "out" && !msg.deleted) items.push({ label: "🗑 Delete for everyone", act: () => deleteForEveryone(peer, msg), danger: true });
+  for (const it of items) { const b = document.createElement("button"); b.className = "menu-item" + (it.danger ? " danger" : ""); b.textContent = it.label; b.addEventListener("click", (e) => { e.stopPropagation(); closeMenus(); it.act(); }); pop.appendChild(b); }
+  const r = anchor.getBoundingClientRect();
+  pop.style.position = "fixed";
+  pop.style.left = `${Math.min(Math.max(8, r.left), window.innerWidth - 210)}px`;
+  const below = r.bottom + 4; const wantAbove = below > window.innerHeight - 180;
+  if (wantAbove) { pop.style.bottom = `${window.innerHeight - r.top + 4}px`; pop.style.top = "auto"; } else { pop.style.top = `${below}px`; pop.style.bottom = "auto"; }
+  closeMenus(); pop.hidden = false; pop.classList.add("open");
 }
 async function openAttachment(m, node) {
   if (!m || !m.file || node.dataset.loading) return;
@@ -739,6 +843,7 @@ function wireUI() {
   const cmenu = $("#chat-menu"); if (cmenu) cmenu.addEventListener("click", (e) => { e.stopPropagation(); openChatMenu(); });
   const btgl = $("#blocked-toggle"); if (btgl) btgl.addEventListener("click", () => { const l = $("#blocked-list"); l.hidden = !l.hidden; });
   wireEmoji();
+  const rc = $("#reply-cancel"); if (rc) rc.addEventListener("click", clearReply);
   const ab = $("#attach-btn"), fi = $("#file-input");
   if (ab && fi) {
     ab.addEventListener("click", () => fi.click());
