@@ -344,8 +344,12 @@ async function main() {
         try { buf = await readBodyBuffer(req, CFG.maxUploadBytes); } catch { return json(res, 413, { error: "file too large" }); }
         if (!buf.length) return json(res, 400, { error: "empty" });
         const mime = String(req.headers["x-file-type"] || "application/octet-stream").slice(0, 100);
+        // Optional auto-delete: the client sends how many seconds the ciphertext
+        // should live. Clamp to <= 30 days; 0/absent means keep for the usual TTL.
+        const expSec = Math.min(Math.max(0, Math.floor(Number(req.headers["x-expire-sec"]) || 0)), 30 * 24 * 3600);
+        const expiresAt = expSec > 0 ? Date.now() + expSec * 1000 : null;
         const id = crypto.randomBytes(18).toString("hex");
-        try { await store.saveFile(id, mime, buf); } catch { return json(res, 500, { error: "store failed" }); }
+        try { await store.saveFile(id, mime, buf, expiresAt); } catch { return json(res, 500, { error: "store failed" }); }
         return json(res, 200, { id });
       }
       if (url.pathname === "/api/file") {
@@ -507,10 +511,13 @@ async function main() {
   });
 
   const pruneTimer = setInterval(() => { store.prune().catch(() => {}); }, 3600 * 1000); pruneTimer.unref();
+  // Expired attachments get swept every 30s so auto-deleted images leave the
+  // server promptly, not just at the hourly prune.
+  const expireTimer = setInterval(() => { store.pruneExpiredFiles().catch(() => {}); }, 30 * 1000); expireTimer.unref();
   let downFlag = false;
   function shutdown() {
     if (downFlag) return; downFlag = true;
-    clearInterval(pruneTimer);
+    clearInterval(pruneTimer); clearInterval(expireTimer);
     try { if (nym) nym.close(); } catch { /* */ }
     try { wss.close(); } catch { /* */ }
     for (const ws of sockets) { try { ws.close(1001, "server shutting down"); } catch { /* */ } }
