@@ -46,6 +46,13 @@ CREATE TABLE IF NOT EXISTS settings (
   key         TEXT PRIMARY KEY,
   value       TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS files (
+  id          TEXT PRIMARY KEY,
+  mime        TEXT NOT NULL,
+  data        BYTEA NOT NULL,
+  created_at  BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_files_created ON files (created_at);
 `;
 
 async function withRetry(fn, { tries = 30, delayMs = 1000 } = {}) {
@@ -136,7 +143,20 @@ export async function openStore(databaseUrl, { mailboxTtlMs = 7 * 24 * 3600 * 10
          SELECT envelope FROM d ORDER BY id ASC`, [mbkey, limit]);
       return r.rows.map((x) => x.envelope);
     },
-    async prune() { await pool.query("DELETE FROM mailbox WHERE created_at < $1", [now() - mailboxTtlMs]); },
+    async prune() {
+      await pool.query("DELETE FROM mailbox WHERE created_at < $1", [now() - mailboxTtlMs]);
+      await pool.query("DELETE FROM files WHERE created_at < $1", [now() - mailboxTtlMs]);
+    },
+
+    // ---- encrypted file attachments (opaque ciphertext; the key travels only
+    // inside the end-to-end message, never here) ----
+    async saveFile(id, mime, buf) {
+      await pool.query("INSERT INTO files(id,mime,data,created_at) VALUES($1,$2,$3,$4)", [id, String(mime).slice(0, 100), buf, now()]);
+    },
+    async getFile(id) {
+      const r = await pool.query("SELECT mime, data FROM files WHERE id=$1", [id]);
+      return r.rows[0] || null;
+    },
 
     // ---- admin / moderation (account-level) ----
     async isBanned(username) {
