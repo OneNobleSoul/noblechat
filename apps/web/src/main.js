@@ -556,7 +556,7 @@ function startReply(key, msg) {
 function clearReply() { state.replyingTo = null; const bar = $("#reply-bar"); if (bar) bar.hidden = true; }
 
 // ---------- file attachments (encrypted; server stores only ciphertext) ----------
-const MAX_FILE_BYTES = 8 * 1024 * 1024;
+const MAX_FILE_BYTES = 500 * 1024 * 1024;
 // map extensions to a mime when the browser gives us none (common for .mov)
 const MEDIA_EXT = { mov: "video/quicktime", mp4: "video/mp4", m4v: "video/mp4", webm: "video/webm", ogv: "video/ogg", mkv: "video/x-matroska", mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav", ogg: "audio/ogg", oga: "audio/ogg", aac: "audio/aac", flac: "audio/flac", opus: "audio/ogg" };
 function fileMime(file) { if (file.type) return file.type; const ext = (file.name.split(".").pop() || "").toLowerCase(); return MEDIA_EXT[ext] || "application/octet-stream"; }
@@ -575,7 +575,7 @@ async function decryptBytes(keyRaw, blob) {
 }
 async function sendFile(file, expireSec = 0) {
   if (!state.active) return;
-  if (file.size > MAX_FILE_BYTES) { toast("file too large (max 8 MB)"); return; }
+  if (file.size > MAX_FILE_BYTES) { toast("file too large (max 500 MB)"); return; }
   const target = state.active;
   toast("encrypting & uploading…");
   try {
@@ -844,7 +844,7 @@ function renderMessages() {
     }
     return `<div class="msg ${m.dir}" data-mi="${i}">${inner}<span class="t">${time}</span>${reactionsHtml(m)}</div>`;
   }).join("");
-  el.querySelectorAll(".att").forEach((a) => a.addEventListener("click", (e) => { e.stopPropagation(); if (a.dataset.loaded) return; openAttachment(msgs[Number(a.dataset.mi)], a); }));
+  el.querySelectorAll(".att").forEach((a) => a.addEventListener("click", (e) => { e.stopPropagation(); if (a.dataset.loaded) { if (a.dataset.kind === "image") openLightbox(a); return; } openAttachment(msgs[Number(a.dataset.mi)], a); }));
   el.querySelectorAll(".rc").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); toggleReaction(state.active, msgs[Number(b.closest(".msg").dataset.mi)], b.dataset.emoji); }));
   el.querySelectorAll(".msg").forEach((n) => n.addEventListener("click", (e) => { if (e.target.closest(".att,.rc,.reply-quote")) return; e.stopPropagation(); openMessageMenu(state.active, msgs[Number(n.dataset.mi)], n); }));
   el.scrollTop = el.scrollHeight;
@@ -886,9 +886,9 @@ async function openAttachment(m, node) {
     const blob = new Blob([bytes], { type: f.mime || "application/octet-stream" });
     const urlObj = URL.createObjectURL(blob);
     const kind = mimeKind(f.mime);
-    if (kind === "image") { node.innerHTML = `<img src="${urlObj}" alt="${esc(f.name)}">`; node.dataset.loaded = "1"; }
-    else if (kind === "video") { node.innerHTML = `<video src="${urlObj}" controls playsinline preload="metadata"></video>`; node.dataset.loaded = "1"; }
-    else if (kind === "audio") { node.innerHTML = `<div class="att-audio"><div class="att-audio-name">🎵 ${esc(f.name)}</div><audio src="${urlObj}" controls preload="metadata"></audio></div>`; node.dataset.loaded = "1"; }
+    if (kind === "image") { node.innerHTML = `<img src="${urlObj}" alt="${esc(f.name)}">`; node.dataset.loaded = "1"; node.dataset.kind = "image"; node.dataset.url = urlObj; node.dataset.name = f.name || ""; openLightbox(node); }
+    else if (kind === "video") { node.innerHTML = `<video src="${urlObj}" controls playsinline preload="metadata"></video>`; node.dataset.loaded = "1"; node.dataset.kind = "video"; }
+    else if (kind === "audio") { node.innerHTML = `<div class="att-audio"><div class="att-audio-name">🎵 ${esc(f.name)}</div><audio src="${urlObj}" controls preload="metadata"></audio></div>`; node.dataset.loaded = "1"; node.dataset.kind = "audio"; }
     else {
       const a = document.createElement("a"); a.href = urlObj; a.download = f.name || "file"; a.click();
       setTimeout(() => URL.revokeObjectURL(urlObj), 10000);
@@ -896,6 +896,21 @@ async function openAttachment(m, node) {
   } catch { toast("could not open file"); }
   finally { delete node.dataset.loading; }
 }
+// full-screen viewer for an already-loaded image; reuses the decrypted blob URL
+function openLightbox(node) {
+  const url = node.dataset.url; if (!url) return;
+  let lb = document.getElementById("lightbox");
+  if (!lb) {
+    lb = document.createElement("div"); lb.id = "lightbox"; lb.className = "lightbox"; lb.hidden = true;
+    lb.innerHTML = `<button class="lb-close" aria-label="Close">✕</button><img class="lb-img" alt="">`;
+    document.body.appendChild(lb);
+    lb.addEventListener("click", (e) => { if (e.target === lb || e.target.closest(".lb-close")) closeLightbox(); });
+  }
+  const img = lb.querySelector(".lb-img"); img.src = url; img.alt = node.dataset.name || "";
+  lb.hidden = false; document.body.classList.add("lb-open");
+}
+function closeLightbox() { const lb = document.getElementById("lightbox"); if (lb) lb.hidden = true; document.body.classList.remove("lb-open"); }
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeLightbox(); });
 function updateStats() { $("#stat-sent").textContent = state.stats.sent; $("#stat-cover").textContent = state.stats.cover; $("#stat-recv").textContent = state.stats.recv; }
 
 // ---------- cover traffic ----------
