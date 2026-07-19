@@ -350,12 +350,12 @@ function onDeliver(envelope) {
   const me = state.user;
   if (content.from === me) {
     const peer = content.to || "unknown"; ensureContact(peer);
-    pushMessage(peer, { dir: "out", body: content.body, ts: content.ts || Date.now(), id: content.id });
+    pushMessage(peer, { dir: "out", body: content.body, ts: content.ts || Date.now(), id: content.id, file: content.file });
   } else {
     const from = content.from || "unknown";
     if (state.blocked.has(from)) return; // blocked sender: drop silently
     ensureContact(from);
-    pushMessage(from, { dir: "in", body: content.body, ts: content.ts || Date.now(), id: content.id });
+    pushMessage(from, { dir: "in", body: content.body, ts: content.ts || Date.now(), id: content.id, file: content.file });
     state.stats.recv++; updateStats();
     const muted = state.muted.has(from);
     if (state.active !== from) bumpUnread(from);
@@ -431,26 +431,59 @@ function sendToCard(card, content) {
   try { activeTransport().submit(card, content); return true; }
   catch (e) { if (String(e.message).includes("unknown provider")) fetchBundle(state.active, { silent: true }); return false; }
 }
-async function sendMessage() {
-  const input = $("#msg-input"); const body = input.value.trim();
-  if (!body || !state.active) return;
-  const target = state.active;
-  // freshen the recipient's device list (and our own) so a device added on
-  // another session still receives this message.
+// Fan a content object out to every recipient device and every own device,
+// then record it locally. `extra` carries anything beyond the plain body
+// (e.g. a file attachment descriptor).
+async function deliverContent(target, body, extra = {}) {
   await fetchBundle(target, { silent: true, noSave: true });
   await loadMyBundle();
   const bundle = state.contacts.get(target);
-  if (!bundle || !bundle.length) { toast("contact has no devices online"); return; }
-  const content = { v: 1, t: "msg", from: state.user, to: target, id: randHex(8), body, ts: Date.now() };
+  if (!bundle || !bundle.length) { toast("contact has no devices online"); return false; }
+  const content = { v: 1, t: "msg", from: state.user, to: target, id: randHex(8), body, ts: Date.now(), ...extra };
   let ok = false;
-  for (const card of bundle) if (sendToCard(card, content)) ok = true;         // every recipient device
+  for (const card of bundle) if (sendToCard(card, content)) ok = true;
   const mine = toB64(state.identity.card.mailbox);
-  for (const card of state.myBundle) if (toB64(card.mailbox) !== mine) sendToCard(card, content); // sync my own devices
-  if (!ok) { toast("send failed"); return; }
+  for (const card of state.myBundle) if (toB64(card.mailbox) !== mine) sendToCard(card, content);
+  if (!ok) { toast("send failed"); return false; }
   state.seen.add(content.id);
-  pushMessage(target, { dir: "out", body, ts: content.ts, id: content.id });
+  pushMessage(target, { dir: "out", body, ts: content.ts, id: content.id, file: extra.file });
   state.stats.sent++; updateStats();
-  input.value = "";
+  return true;
+}
+async function sendMessage() {
+  const input = $("#msg-input"); const body = input.value.trim();
+  if (!body || !state.active) return;
+  if (await deliverContent(state.active, body)) input.value = "";
+}
+
+// ---------- file attachments (encrypted; server stores only ciphertext) ----------
+const MAX_FILE_BYTES = 8 * 1024 * 1024;
+async function encryptBytes(keyRaw, bytes) {
+  const key = await crypto.subtle.importKey("raw", keyRaw, { name: "AES-GCM" }, false, ["encrypt"]);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, bytes));
+  const out = new Uint8Array(iv.length + ct.length); out.set(iv); out.set(ct, iv.length); return out;
+}
+async function decryptBytes(keyRaw, blob) {
+  const key = await crypto.subtle.importKey("raw", keyRaw, { name: "AES-GCM" }, false, ["decrypt"]);
+  const raw = new Uint8Array(blob);
+  return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: raw.slice(0, 12) }, key, raw.slice(12)));
+}
+async function sendFile(file) {
+  if (!state.active) return;
+  if (file.size > MAX_FILE_BYTES) { toast("file too large (max 8 MB)"); return; }
+  const target = state.active;
+  toast("encrypting & uploading…");
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const keyRaw = crypto.getRandomValues(new Uint8Array(32));
+    const enc = await encryptBytes(keyRaw, bytes);
+    const r = await fetch(`/api/upload?token=${encodeURIComponent(state.token)}`, { method: "POST", headers: { "content-type": "application/octet-stream", "x-file-type": file.type || "application/octet-stream" }, body: enc });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.id) { toast(j.error || "upload failed"); return; }
+    const fileMeta = { name: file.name.slice(0, 120), mime: file.type || "application/octet-stream", size: file.size, id: j.id, key: toB64(keyRaw) };
+    await deliverContent(target, "", { file: fileMeta });
+  } catch { toast("could not send file"); }
 }
 
 // ---------- state + render ----------
@@ -580,10 +613,40 @@ function openChatMenu() {
   const wasOpen = pop.classList.contains("open"); closeMenus();
   if (!wasOpen) { pop.hidden = false; pop.classList.add("open"); }
 }
+function fmtSize(n) { n = Number(n) || 0; if (n < 1024) return n + " B"; if (n < 1048576) return (n / 1024).toFixed(0) + " KB"; return (n / 1048576).toFixed(1) + " MB"; }
 function renderMessages() {
   const el = $("#messages"); const msgs = state.convos.get(state.active) || [];
-  el.innerHTML = msgs.map((m) => { const time = new Date(m.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); return `<div class="msg ${m.dir}">${esc(m.body)}<span class="t">${time}</span></div>`; }).join("");
+  el.innerHTML = msgs.map((m, i) => {
+    const time = new Date(m.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    let inner = m.body ? esc(m.body) : "";
+    if (m.file) {
+      const f = m.file; const isImg = String(f.mime || "").startsWith("image/");
+      if (isImg) inner = `<div class="att att-img" data-mi="${i}"><div class="att-ph">🖼 ${esc(f.name)} · tap to load</div></div>` + (m.body ? `<div class="att-cap">${esc(m.body)}</div>` : "");
+      else inner = `<div class="att att-file" data-mi="${i}"><span class="att-ic">📄</span><span class="att-meta"><b>${esc(f.name)}</b><span>${fmtSize(f.size)} · tap to download</span></span></div>` + (m.body ? `<div class="att-cap">${esc(m.body)}</div>` : "");
+    }
+    return `<div class="msg ${m.dir}">${inner}<span class="t">${time}</span></div>`;
+  }).join("");
+  el.querySelectorAll(".att").forEach((a) => a.addEventListener("click", () => openAttachment(msgs[Number(a.dataset.mi)], a)));
   el.scrollTop = el.scrollHeight;
+}
+async function openAttachment(m, node) {
+  if (!m || !m.file || node.dataset.loading) return;
+  const f = m.file; node.dataset.loading = "1";
+  try {
+    const r = await fetch(`/api/file?id=${encodeURIComponent(f.id)}`);
+    if (!r.ok) { toast("file no longer available"); return; }
+    const buf = await r.arrayBuffer();
+    const bytes = await decryptBytes(fromB64(f.key), buf);
+    const blob = new Blob([bytes], { type: f.mime || "application/octet-stream" });
+    const urlObj = URL.createObjectURL(blob);
+    if (String(f.mime || "").startsWith("image/")) {
+      node.innerHTML = `<img src="${urlObj}" alt="${esc(f.name)}">`;
+    } else {
+      const a = document.createElement("a"); a.href = urlObj; a.download = f.name || "file"; a.click();
+      setTimeout(() => URL.revokeObjectURL(urlObj), 10000);
+    }
+  } catch { toast("could not open file"); }
+  finally { delete node.dataset.loading; }
 }
 function updateStats() { $("#stat-sent").textContent = state.stats.sent; $("#stat-cover").textContent = state.stats.cover; $("#stat-recv").textContent = state.stats.recv; }
 
@@ -625,6 +688,8 @@ function wireUI() {
   const cmenu = $("#chat-menu"); if (cmenu) cmenu.addEventListener("click", (e) => { e.stopPropagation(); openChatMenu(); });
   const btgl = $("#blocked-toggle"); if (btgl) btgl.addEventListener("click", () => { const l = $("#blocked-list"); l.hidden = !l.hidden; });
   wireEmoji();
+  const ab = $("#attach-btn"), fi = $("#file-input");
+  if (ab && fi) { ab.addEventListener("click", () => fi.click()); fi.addEventListener("change", () => { const f = fi.files && fi.files[0]; if (f) sendFile(f); fi.value = ""; }); }
   document.addEventListener("click", (e) => { if (!e.target.closest(".menu-pop") && !e.target.closest(".row-menu") && !e.target.closest("#chat-menu")) closeMenus(); if (!e.target.closest(".emoji-wrap")) closeEmoji(); });
   window.addEventListener("focus", () => { if (state.active) clearUnread(state.active); });
   updateStats();

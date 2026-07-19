@@ -34,6 +34,7 @@ const CFG = {
   maxBodyBytes: Number(process.env.MAX_BODY_BYTES || 64 * 1024),
   maxBlobBytes: Number(process.env.MAX_BLOB_BYTES || 512 * 1024),
   maxWsMsgBytes: Number(process.env.MAX_WS_MSG_BYTES || 128 * 1024),
+  maxUploadBytes: Number(process.env.MAX_UPLOAD_BYTES || 8 * 1024 * 1024),
   maxConnPerIp: Number(process.env.MAX_CONN_PER_IP || 20),
   mailboxTtlMs: Number(process.env.MAILBOX_TTL_MS || 7 * 24 * 3600 * 1000),
   maxPerMailbox: Number(process.env.MAX_PER_MAILBOX || 1000),
@@ -65,7 +66,7 @@ const MIME = {
 };
 const CSP = [
   "default-src 'self'", "base-uri 'self'", "object-src 'none'", "frame-ancestors 'none'",
-  "img-src 'self' data:", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "img-src 'self' data: blob:", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com",
   // 'wasm-unsafe-eval' lets the lazily-loaded nym transport instantiate its
   // WebAssembly mix client; it does not permit JS eval.
@@ -108,6 +109,14 @@ function readBody(req, maxBytes) {
     let size = 0; const chunks = [];
     req.on("data", (c) => { size += c.length; if (size > maxBytes) { req.destroy(); reject(new Error("body too large")); return; } chunks.push(c); });
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    req.on("error", reject);
+  });
+}
+function readBodyBuffer(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    let size = 0; const chunks = [];
+    req.on("data", (c) => { size += c.length; if (size > maxBytes) { req.destroy(); reject(new Error("body too large")); return; } chunks.push(c); });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
     req.on("error", reject);
   });
 }
@@ -322,6 +331,32 @@ async function main() {
           online[h] = mbks.some((k) => { const s = mbkeySockets.get(k); return !!(s && s.size > 0); });
         }
         return json(res, 200, { online });
+      }
+      // Encrypted attachment upload/download. The body is opaque ciphertext the
+      // client encrypted locally; the decryption key travels only inside the
+      // end-to-end message, so the server stores and serves bytes it can't read.
+      if (url.pathname === "/api/upload" && req.method === "POST") {
+        if (!httpLimit(ip, 4)) return json(res, 429, { error: "rate limited" });
+        const username = await sessionUser(url.searchParams.get("token"));
+        if (!username) return json(res, 401, { error: "not signed in" });
+        if (await store.isBanned(username)) return json(res, 403, { error: "account suspended" });
+        let buf;
+        try { buf = await readBodyBuffer(req, CFG.maxUploadBytes); } catch { return json(res, 413, { error: "file too large" }); }
+        if (!buf.length) return json(res, 400, { error: "empty" });
+        const mime = String(req.headers["x-file-type"] || "application/octet-stream").slice(0, 100);
+        const id = crypto.randomBytes(18).toString("hex");
+        try { await store.saveFile(id, mime, buf); } catch { return json(res, 500, { error: "store failed" }); }
+        return json(res, 200, { id });
+      }
+      if (url.pathname === "/api/file") {
+        if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" });
+        const id = String(url.searchParams.get("id") || "");
+        if (!/^[a-f0-9]{36}$/.test(id)) { res.writeHead(400).end(); return; }
+        const f = await store.getFile(id);
+        if (!f) { res.writeHead(404).end(); return; }
+        res.writeHead(200, { "content-type": "application/octet-stream", "x-file-type": f.mime, "Cache-Control": "private, max-age=86400" });
+        res.end(f.data);
+        return;
       }
       if (url.pathname === "/api/account/blob") {
         if (req.method === "GET") {
