@@ -92,14 +92,14 @@
       <div id="blocked-list" class="blocked-list" hidden></div>
     </div>
     <div class="net-panel">
-      <div class="net-title">MIX NETWORK</div>
+      <div class="net-title"><span id="net-title-text">MIX NETWORK</span><span id="net-transport" class="net-transport">internal</span></div>
       <div id="net-layers" class="net-layers"></div>
       <div class="net-stats">
         <span>sent <b id="stat-sent">0</b></span>
         <span>cover <b id="stat-cover">0</b></span>
         <span>recv <b id="stat-recv">0</b></span>
       </div>
-      <p class="net-note">Every packet is the same size and equally opaque. The server can't tell a message from cover traffic.</p>
+      <p id="net-note" class="net-note">Every packet is the same size and equally opaque. The server can't tell a message from cover traffic.</p>
     </div>
   </aside>
 
@@ -124,6 +124,10 @@
       </div>
       <div id="messages" class="messages"></div>
       <div class="composer">
+        <div class="emoji-wrap">
+          <button id="emoji-btn" class="icon-btn" title="Emoji" aria-label="Emoji" type="button">🙂</button>
+          <div id="emoji-pop" class="emoji-pop" hidden></div>
+        </div>
         <input id="msg-input" placeholder="type a message…" autocomplete="off">
         <button id="msg-send" class="btn">Send</button>
       </div>
