@@ -573,22 +573,58 @@ async function decryptBytes(keyRaw, blob) {
   const raw = new Uint8Array(blob);
   return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: raw.slice(0, 12) }, key, raw.slice(12)));
 }
+// Chunked encryption for large files: encrypt the file slice by slice instead of
+// pulling the whole thing into memory and encrypting it in one go. Peak memory
+// stays around one file-size (the output buffer) plus a single chunk, instead of
+// ~3x, which is what made big videos silently die on low-memory phones.
+// Format: [0x01][chunkSize:u32 BE] then per chunk [iv:12][AES-GCM(ct+tag)].
+const ENC_CHUNK = 4 * 1024 * 1024;
+async function encryptFileChunked(keyRaw, file) {
+  const key = await crypto.subtle.importKey("raw", keyRaw, { name: "AES-GCM" }, false, ["encrypt"]);
+  const size = file.size;
+  const nChunks = Math.max(1, Math.ceil(size / ENC_CHUNK));
+  const out = new Uint8Array(5 + nChunks * 28 + size);
+  out[0] = 0x01; new DataView(out.buffer).setUint32(1, ENC_CHUNK, false);
+  let off = 5;
+  for (let start = 0; start < size || (size === 0 && start === 0); start += ENC_CHUNK) {
+    const slice = new Uint8Array(await file.slice(start, Math.min(start + ENC_CHUNK, size)).arrayBuffer());
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, slice));
+    out.set(iv, off); off += 12; out.set(ct, off); off += ct.length;
+    if (size === 0) break;
+  }
+  return out.subarray(0, off);
+}
+// Decrypt a chunked blob into a Blob, decoding chunk by chunk so we never hold
+// two full copies of the payload at once.
+async function decryptChunkedToBlob(keyRaw, buf, mime) {
+  const key = await crypto.subtle.importKey("raw", keyRaw, { name: "AES-GCM" }, false, ["decrypt"]);
+  const raw = new Uint8Array(buf);
+  const chunkSize = new DataView(raw.buffer, raw.byteOffset).getUint32(1, false);
+  const parts = []; let off = 5;
+  while (off < raw.length) {
+    const iv = raw.slice(off, off + 12); off += 12;
+    const ctLen = Math.min(chunkSize + 16, raw.length - off);
+    const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, raw.slice(off, off + ctLen));
+    off += ctLen; parts.push(new Uint8Array(pt));
+  }
+  return new Blob(parts, { type: mime || "application/octet-stream" });
+}
 async function sendFile(file, expireSec = 0) {
   if (!state.active) return;
   if (file.size > MAX_FILE_BYTES) { toast("file too large (max 500 MB)"); return; }
   const target = state.active;
   toast("encrypting & uploading…");
   try {
-    const bytes = new Uint8Array(await file.arrayBuffer());
     const keyRaw = crypto.getRandomValues(new Uint8Array(32));
-    const enc = await encryptBytes(keyRaw, bytes);
+    const enc = await encryptFileChunked(keyRaw, file);
     const mime = fileMime(file);
     const headers = { "content-type": "application/octet-stream", "x-file-type": mime };
     if (expireSec > 0) headers["x-expire-sec"] = String(expireSec);
     const r = await fetch(`/api/upload?token=${encodeURIComponent(state.token)}`, { method: "POST", headers, body: enc });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j.id) { toast(j.error || "upload failed"); return; }
-    const fileMeta = { name: file.name.slice(0, 120), mime, size: file.size, id: j.id, key: toB64(keyRaw) };
+    const fileMeta = { name: file.name.slice(0, 120), mime, size: file.size, id: j.id, key: toB64(keyRaw), enc: "c1" };
     if (expireSec > 0) fileMeta.expireAt = Date.now() + expireSec * 1000;
     await deliverContent(target, "", { file: fileMeta });
   } catch { toast("could not send file"); }
@@ -882,8 +918,9 @@ async function openAttachment(m, node) {
     const r = await fetch(`/api/file?id=${encodeURIComponent(f.id)}`);
     if (!r.ok) { toast("file no longer available"); return; }
     const buf = await r.arrayBuffer();
-    const bytes = await decryptBytes(fromB64(f.key), buf);
-    const blob = new Blob([bytes], { type: f.mime || "application/octet-stream" });
+    const blob = f.enc === "c1"
+      ? await decryptChunkedToBlob(fromB64(f.key), buf, f.mime)
+      : new Blob([await decryptBytes(fromB64(f.key), buf)], { type: f.mime || "application/octet-stream" });
     const urlObj = URL.createObjectURL(blob);
     const kind = mimeKind(f.mime);
     if (kind === "image") { node.innerHTML = `<img src="${urlObj}" alt="${esc(f.name)}">`; node.dataset.loaded = "1"; node.dataset.kind = "image"; node.dataset.url = urlObj; node.dataset.name = f.name || ""; openLightbox(node); }
