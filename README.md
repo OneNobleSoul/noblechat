@@ -18,8 +18,10 @@ primitives come from the audited `@noble` libraries, but the way they are
 composed here (the Sphinx layer, the packet and mailbox format, the account and
 multi device model) has not had an independent security audit. Do not rely on it
 to protect real secrets until that review has happened. See
-[SECURITY.md](SECURITY.md) and [docs/ENTERPRISE.md](docs/ENTERPRISE.md) for an
-honest gap analysis.
+[SECURITY.md](SECURITY.md) for how to report issues.
+
+New to the ideas behind it? The running app has a plain-language, animated
+explainer at `/info.html`.
 
 ## What is inside
 
@@ -32,10 +34,16 @@ honest gap analysis.
   public contact cards, a password hash, and an opaque (client encrypted)
   contacts blob.
 - Accounts with password login, multi device fan out, and durable offline
-  delivery backed by PostgreSQL.
+  delivery backed by PostgreSQL: messages wait in an encrypted mailbox until the
+  recipient reconnects.
+- 1:1 and group chats, encrypted file and image attachments, auto-deleting
+  images, message replies, emoji reactions and delete-for-everyone.
+- Voice and video calls over WebRTC, with the signalling carried end to end
+  through the same channel.
 - A switchable transport: the built-in mix network, or the public Nym mixnet
   via an optional nym-client sidecar. The gateway falls back to the internal
-  network if the sidecar is not reachable.
+  network if the sidecar is not reachable, and restores nym automatically once
+  it reconnects.
 - An admin panel for announcements, maintenance mode, moderation, a server event
   log, runtime stats, mix node health and the transport switch.
 - Installable clients: a PWA (desktop, Android, iOS home screen) plus native
@@ -103,8 +111,8 @@ Open the deployment URL in any modern browser. To install as an app:
 - iPhone (Safari): Share, then "Add to Home Screen".
 
 Tagged releases also build native desktop installers (AppImage, dmg, exe) and an
-Android apk and attach them to the GitHub release. See the clients section in the
-repository and `docs/ENTERPRISE.md` for the iOS note.
+Android apk and attach them to the GitHub release. iOS runs as a home-screen web
+app; a native App Store build would need an Apple developer account.
 
 ## Security
 
