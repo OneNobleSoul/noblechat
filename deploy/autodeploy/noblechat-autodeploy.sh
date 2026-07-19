@@ -64,10 +64,11 @@ for attempt in 1 2 3 4 5; do
 done
 if ! gateway_ok; then log "ERROR gateway did not come up; manual attention needed"; exit 1; fi
 
-# 3. Reconcile the rest (mix nodes, nym-client) now that the site already serves.
-#    The gateway already matches the desired state, so this won't recreate it; if
-#    the nym-client stop grace stalls here it no longer causes an outage.
-docker compose up -d >>"$LOG" 2>&1 || true
+# 3. Reconcile every OTHER service (mix nodes, providers, db, nym-client) now
+#    that the site already serves. Explicitly excluding the gateway keeps a plain
+#    `up -d` from recreating it a second time and briefly 502-ing.
+others=$(docker compose config --services 2>/dev/null | grep -vx noblechat | tr '\n' ' ')
+docker compose up -d --no-deps $others >>"$LOG" 2>&1 || true
 gateway_ok || { docker compose up -d --no-deps noblechat >>"$LOG" 2>&1 || true; }
 log "deploy ok, now at $(git rev-parse HEAD)"
 exit 0
