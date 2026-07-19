@@ -45,9 +45,12 @@ if ! docker compose up -d --build >>"$LOG" 2>&1; then
   exit 1
 fi
 
-# A blanket recreate has, on occasion, left the gateway container "Created"
-# rather than running (brief 502). Verify it actually comes up healthy and, if
-# not, nudge it and retry a couple of times before giving up.
+# The blanket recreate above sometimes leaves the gateway container "Created"
+# rather than running (the nym-client's long stop grace can stall the batch
+# start), causing a 502. A TARGETED `up -d noblechat` reliably starts it, so we
+# always run it and then verify health, nudging the same way (never the plain
+# `up -d`, which reproduces the stall) and retrying before giving up.
+docker compose up -d noblechat >>"$LOG" 2>&1 || true
 gateway_ok() {
   docker compose ps --format '{{.Service}} {{.State}}' 2>/dev/null | grep -q '^noblechat running' \
     && docker exec noblechat node -e 'fetch("http://127.0.0.1:8790/healthz").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))' >/dev/null 2>&1
@@ -58,8 +61,8 @@ for attempt in 1 2 3; do
     log "deploy ok, now at $(git rev-parse HEAD)"
     exit 0
   fi
-  log "gateway not healthy after deploy (attempt $attempt), nudging with compose up -d"
-  docker compose up -d >>"$LOG" 2>&1
+  log "gateway not healthy after deploy (attempt $attempt), nudging with compose up -d noblechat"
+  docker compose up -d noblechat >>"$LOG" 2>&1
 done
 log "ERROR gateway did not become healthy after deploy; manual attention needed"
 exit 1
