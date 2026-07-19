@@ -87,16 +87,20 @@ a{color:var(--accent)}
 .swarm .node{animation:nodepulse 3s ease-in-out infinite}
 .swarm .node.n1b{animation-delay:.5s}.swarm .node.n2{animation-delay:1s}.swarm .node.n2b{animation-delay:1.4s}.swarm .node.n3{animation-delay:2s}.swarm .node.n3b{animation-delay:2.4s}
 @keyframes nodepulse{0%,100%{border-color:var(--line);box-shadow:none}50%{border-color:color-mix(in srgb,var(--accent) 50%,var(--line));box-shadow:0 0 12px -3px var(--accent)}}
-.swarm .p{position:absolute;width:10px;height:10px;border-radius:3px;background:#101a26;border:1px solid #223047;left:-6%;animation:flow 8.5s linear infinite}
-.swarm .p.real{width:14px;height:14px;background:var(--accent);border-color:var(--accent);box-shadow:0 0 10px -1px var(--accent)}
-@keyframes flow{0%{left:-6%;opacity:0}9%{opacity:.9}91%{opacity:.9}100%{left:104%;opacity:0}}
-.swarm .p:nth-child(1){top:34%;animation-duration:8.5s;animation-delay:0s}
-.swarm .p:nth-child(2){top:52%;animation-duration:8s;animation-delay:2.3s}
-.swarm .p:nth-child(3){top:42%;animation-duration:9s;animation-delay:4.2s}
-.swarm .p:nth-child(4){top:60%;animation-duration:8.6s;animation-delay:1.3s}
-.swarm .p:nth-child(5){top:46%;animation-duration:8.2s;animation-delay:5.7s}
-.swarm .p:nth-child(6){top:56%;animation-duration:9.2s;animation-delay:3.4s}
-.swarm .p:nth-child(7){top:38%;animation-duration:8.8s;animation-delay:6.5s}
+/* packets actually route THROUGH the nodes, each on a different path, pausing at
+   every hop (mixing delay) so no single line can be followed end to end */
+.swarm .p{position:absolute;width:10px;height:10px;border-radius:3px;background:#101a26;border:1px solid #2a3a50;left:3%;top:48%}
+.swarm .p.real{width:13px;height:13px;background:var(--accent);border-color:var(--accent);box-shadow:0 0 10px -1px var(--accent);z-index:4}
+.swarm .p.r1{animation:route1 8s linear 0s infinite}
+.swarm .p.r2{animation:route2 8.6s linear 1.5s infinite}
+.swarm .p.r3{animation:route3 7.6s linear 3s infinite}
+.swarm .p.r4{animation:route4 9s linear .8s infinite}
+.swarm .p.r5{animation:route5 8.2s linear 4.2s infinite}
+@keyframes route1{0%{left:3%;top:48%;opacity:0}6%{opacity:1}24%{left:28%;top:24%}30%{left:28%;top:24%}50%{left:50%;top:12%}56%{left:50%;top:12%}76%{left:72%;top:30%}82%{left:72%;top:30%}94%{left:92%;top:48%;opacity:1}100%{left:92%;top:48%;opacity:0}}
+@keyframes route2{0%{left:3%;top:48%;opacity:0}6%{opacity:1}24%{left:28%;top:62%}30%{left:28%;top:62%}50%{left:50%;top:44%}56%{left:50%;top:44%}76%{left:72%;top:66%}82%{left:72%;top:66%}94%{left:92%;top:48%;opacity:1}100%{left:92%;top:48%;opacity:0}}
+@keyframes route3{0%{left:3%;top:48%;opacity:0}6%{opacity:1}24%{left:28%;top:62%}30%{left:28%;top:62%}50%{left:50%;top:44%}56%{left:50%;top:44%}76%{left:72%;top:30%}82%{left:72%;top:30%}94%{left:92%;top:48%;opacity:1}100%{left:92%;top:48%;opacity:0}}
+@keyframes route4{0%{left:3%;top:48%;opacity:0}6%{opacity:1}24%{left:28%;top:24%}30%{left:28%;top:24%}50%{left:50%;top:44%}56%{left:50%;top:44%}76%{left:72%;top:66%}82%{left:72%;top:66%}94%{left:92%;top:48%;opacity:1}100%{left:92%;top:48%;opacity:0}}
+@keyframes route5{0%{left:3%;top:48%;opacity:0}6%{opacity:1}24%{left:28%;top:24%}30%{left:28%;top:24%}50%{left:50%;top:12%}56%{left:50%;top:12%}76%{left:72%;top:66%}82%{left:72%;top:66%}94%{left:92%;top:48%;opacity:1}100%{left:92%;top:48%;opacity:0}}
 .swarm .legend{position:absolute;bottom:-2px;left:0;right:0;display:flex;justify-content:center;gap:20px;font-family:var(--mono);font-size:10.5px;color:var(--dim)}
 .swarm .legend .g1{color:var(--accent)}
 
@@ -210,7 +214,7 @@ a{color:var(--accent)}
         <div class="node n2b"></div><div class="node n1"></div><div class="node n1b"></div>
         <div class="node n2"></div><div class="node n3"></div><div class="node n3b"></div>
         <div class="ep friend">🧑<span class="lbl">friend</span></div>
-        <span class="p"></span><span class="p real"></span><span class="p"></span><span class="p"></span><span class="p real"></span><span class="p"></span><span class="p"></span>
+        <span class="p r1"></span><span class="p r2 real"></span><span class="p r3"></span><span class="p r4 real"></span><span class="p r5"></span>
         <div class="legend"><span class="g1">■ your real message</span><span>■ everyone's traffic, mixed together</span></div>
       </div>
     </div>
