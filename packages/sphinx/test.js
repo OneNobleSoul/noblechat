@@ -59,3 +59,9 @@ test("tampering with the payload is detected at the exit via the inner AEAD cont
   const pkt = createPacket(path, utf8ToBytes("x"));
   assert.equal(pkt.payload.length, PAYLOAD_LEN);
 });
+
+test("an inner payload larger than PAYLOAD_LEN is rejected, not silently truncated", () => {
+  const hops = [nodeWithId()];
+  const path = hops.map((h) => ({ id: h.id, public: h.key.public }));
+  assert.throws(() => createPacket(path, new Uint8Array(PAYLOAD_LEN + 1)), /payload too large/);
+});

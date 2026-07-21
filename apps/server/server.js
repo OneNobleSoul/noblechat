@@ -252,7 +252,7 @@ async function main() {
           if (!HANDLE_RE.test(username)) return json(res, 400, { error: "handle must be 3-24 chars: a-z 0-9 _" });
           if (typeof b.password !== "string" || b.password.length < 8) return json(res, 400, { error: "password too short (min 8)" });
           if (await store.getAccount(username)) return json(res, 409, { error: "handle already taken" });
-          await store.createAccount(username, hashPassword(b.password));
+          await store.createAccount(username, await hashPassword(b.password));
           counters.registered++;
           elog.add("info", "account registered", username);
           const token = crypto.randomBytes(32).toString("hex");
@@ -266,7 +266,7 @@ async function main() {
           const b = JSON.parse(await readBody(req, CFG.maxBodyBytes));
           const username = String(b.username || "").toLowerCase();
           const acc = await store.getAccount(username);
-          if (!acc || !verifyPassword(String(b.password || ""), acc.pass)) return json(res, 401, { error: "wrong handle or password" });
+          if (!acc || !(await verifyPassword(String(b.password || ""), acc.pass))) return json(res, 401, { error: "wrong handle or password" });
           if (acc.banned) return json(res, 403, { error: "account suspended" });
           counters.logins++;
           const token = crypto.randomBytes(32).toString("hex");
@@ -397,7 +397,7 @@ async function main() {
             const b = JSON.parse(await readBody(req, CFG.maxBodyBytes));
             const username = String(b.username || "").toLowerCase();
             const acc = await store.getAccount(username);
-            if (!acc || !verifyPassword(String(b.password || ""), acc.pass)) return json(res, 401, { error: "wrong handle or password" });
+            if (!acc || !(await verifyPassword(String(b.password || ""), acc.pass))) return json(res, 401, { error: "wrong handle or password" });
             if (acc.banned) return json(res, 403, { error: "account suspended" });
             if (!acc.is_admin) return json(res, 403, { error: "not an admin account" });
             const token = crypto.randomBytes(32).toString("hex");

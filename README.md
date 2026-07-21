@@ -79,9 +79,12 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-The gateway listens on port 8790 inside the compose network. Put a reverse proxy
-(for example Caddy or nginx) in front of it for TLS. The compose file also starts
-the mix nodes, the providers, and a PostgreSQL database.
+The gateway comes up on http://127.0.0.1:8790 (loopback only; set HTTP_PORT in
+`.env` if that port is taken). Put a reverse proxy (for example Caddy or nginx)
+in front of it for TLS. If your proxy lives in a different compose project,
+attach the `noblechat` service to its network with a `docker-compose.override.yml`
+instead of exposing the port. The compose file also starts the mix nodes, the
+providers, and a PostgreSQL database.
 
 To route over the public Nym mixnet instead of the internal one, set
 `NYM_CLIENT_URL=ws://nym-client:1977` in `.env`. That starts the bundled

@@ -42,12 +42,16 @@ test("validCard requires a full, well-formed device card", () => {
   assert.ok(!validCard("kirito"));
 });
 
-test("hashPassword/verifyPassword round-trip and reject wrong passwords", () => {
-  const stored = hashPassword("correct horse battery staple");
-  assert.ok(verifyPassword("correct horse battery staple", stored));
-  assert.ok(!verifyPassword("wrong password", stored));
+test("hashPassword/verifyPassword round-trip and reject wrong passwords", async () => {
+  const stored = await hashPassword("correct horse battery staple");
+  assert.ok(await verifyPassword("correct horse battery staple", stored));
+  assert.ok(!(await verifyPassword("wrong password", stored)));
   // malformed stored values (no salt separator) never verify, never throw
-  assert.ok(!verifyPassword("anything", "not-a-hash"));
+  assert.ok(!(await verifyPassword("anything", "not-a-hash")));
+  // a corrupt entry with an empty hash after the separator must not match
+  // everything (scrypt with keylen 0 would happily return an empty buffer)
+  const salt = stored.slice(0, stored.indexOf("$"));
+  assert.ok(!(await verifyPassword("anything", salt + "$")));
 });
 
 test("timingEqual compares values, not just lengths", () => {

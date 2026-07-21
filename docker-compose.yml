@@ -42,10 +42,13 @@ services:
       FILES_DIR: /app/data/files
     volumes:
       - noblechat-files:/app/data/files
-    expose:
-      - "8790"
+    # Published on loopback only: put your own reverse proxy (Caddy, nginx)
+    # in front for TLS. Change HTTP_PORT in .env if 8790 is taken. If your
+    # proxy runs in another compose project, attach this service to its
+    # network with a docker-compose.override.yml instead.
+    ports:
+      - "127.0.0.1:${HTTP_PORT:-8790}:8790"
     networks:
-      - jarvis20_default
       - noblechat_internal
 
   # Optional sidecar holding our identity on the public Nym mixnet. Only the
@@ -294,8 +297,6 @@ services:
           --denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
 
 networks:
-  jarvis20_default:
-    external: true
   noblechat_internal:
     driver: bridge
 
