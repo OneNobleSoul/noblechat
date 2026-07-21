@@ -371,10 +371,18 @@ async function main() {
           res.writeHead(200, headers);
           rs.pipe(res);
         });
-        rs.on("error", async () => {
-          // metadata without bytes (disk wiped?): drop the orphan row
-          await store.removeFile(id).catch(() => {});
-          if (!res.headersSent) { res.writeHead(404).end(); } else res.destroy();
+        rs.on("error", async (err) => {
+          if (err && err.code === "ENOENT") {
+            // the ciphertext file is genuinely gone: drop the now-useless row
+            await store.removeFile(id).catch(() => {});
+            if (!res.headersSent) { res.writeHead(404).end(); } else res.destroy();
+          } else {
+            // a transient read error (EMFILE, EIO, EACCES): the file is still
+            // there, so keep the row and fail this request only - deleting here
+            // would make the attachment permanently unopenable for everyone
+            elog.add("error", "file read failed", String(err && err.code || err));
+            if (!res.headersSent) { res.writeHead(500).end(); } else res.destroy();
+          }
         });
         return;
       }
