@@ -17,6 +17,35 @@ reaches a stable release.
 - Admin panel for announcements, maintenance mode, and moderation.
 - PostgreSQL backed durable storage with offline message delivery.
 - Installable PWA and native desktop and Android builds from CI.
+- Sender authentication: every message envelope is signed with the sender's
+  hybrid keypair (Ed25519 + ML-DSA-65) and verified by the recipient against the
+  sender's published device cards. Encryption alone never proved who sent a
+  message; now it does.
+
+### Changed
+- Attachment ciphertext is streamed to disk under `FILES_DIR` instead of being
+  buffered in memory and stored as a Postgres blob, so large uploads no longer
+  risk running the gateway out of memory.
+- Password hashing runs off the event loop (async scrypt), so a login can no
+  longer stall message routing.
+
+### Breaking
+- The end-to-end envelope format changed (a version byte plus the sender
+  signature, and the fixed mix payload grew from 2048 to 8192 bytes). This is a
+  wire break: a recipient running the new client cannot open an envelope built
+  by the old one, and `openEnvelope` rejects the old format rather than
+  guessing. Two consequences when deploying this:
+  - Any messages still queued in a mailbox from before the upgrade are dropped
+    on delivery (a one-time loss). Let mailboxes drain, or accept it.
+  - All clients must update together; a lagging client stops receiving until it
+    reloads the new bundle.
+  There is no in-place migration because the server never holds the plaintext or
+  keys needed to re-sign an old envelope.
+
+### Removed
+- `scripts/gen-compose.py`. `docker-compose.yml` is maintained by hand and is
+  the source of truth; the generator had drifted behind the hand-added
+  nym-client, coturn, and volume config and would have silently deleted them.
 
 ## 0.1.0
 

@@ -1,3 +1,8 @@
+# This file is maintained by hand and is the single source of truth for the
+# stack. There is no generator: the mix topology (3 layers x 2 nodes + 2
+# providers) is pinned to NET_SEED and effectively never changes, so the extra
+# service blocks are cheaper to edit directly than to keep a code generator in
+# sync with the hand-added nym-client, coturn, and volume config.
 services:
   db:
     image: postgres:16-alpine
