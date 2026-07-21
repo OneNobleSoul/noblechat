@@ -39,6 +39,9 @@ services:
       NYM_CLIENT_URL: ${NYM_CLIENT_URL:-}
       TURN_SHARED_SECRET: ${TURN_SHARED_SECRET:-}
       TURN_URIS: ${TURN_URIS:-}
+      FILES_DIR: /app/data/files
+    volumes:
+      - noblechat-files:/app/data/files
     # Published on loopback only: put your own reverse proxy (Caddy, nginx)
     # in front for TLS. Change HTTP_PORT in .env if 8790 is taken. If your
     # proxy runs in another compose project, attach this service to its
@@ -299,4 +302,5 @@ networks:
 
 volumes:
   noblechat-db:
+  noblechat-files:
   nym-client-data:

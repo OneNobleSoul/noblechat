@@ -8,7 +8,9 @@ RUN npm install --no-audit --no-fund
 COPY . .
 RUN node scripts/build-web.js
 
-RUN useradd -m app && chown -R app:app /app
+# data/files holds uploaded attachment ciphertext; created here (before the
+# chown) so a named volume mounted on top inherits app ownership
+RUN mkdir -p /app/data/files && useradd -m app && chown -R app:app /app
 USER app
 
 ENV PORT=8790 MEAN_DELAY_MS=60 NODE_ENV=production

@@ -3,6 +3,9 @@
 // Postgres and starts listening the moment it's imported, which makes it
 // awkward to pull individual pieces into a test file.
 import crypto from "node:crypto";
+import fs from "node:fs";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 export const HANDLE_RE = /^[a-z0-9_]{3,24}$/;
 export const B64_RE = /^[A-Za-z0-9+/=]{1,4096}$/;
@@ -32,6 +35,29 @@ export function readBodyBuffer(req, maxBytes) {
     req.on("end", () => resolve(Buffer.concat(chunks)));
     req.on("error", reject);
   });
+}
+
+// Stream a request body straight to a file, enforcing the size limit as the
+// bytes arrive. Nothing is buffered in memory, so a 500 MB upload costs a few
+// chunk-sized buffers instead of half a gigabyte of process RAM. Returns the
+// byte count; on any failure (limit exceeded, disk error, aborted request)
+// the partial file is removed and the error rethrown.
+export async function streamToFile(req, filePath, maxBytes) {
+  let size = 0;
+  const limit = new Transform({
+    transform(chunk, _enc, cb) {
+      size += chunk.length;
+      if (size > maxBytes) cb(new Error("body too large"));
+      else cb(null, chunk);
+    },
+  });
+  try {
+    await pipeline(req, limit, fs.createWriteStream(filePath, { flags: "wx" }));
+    return size;
+  } catch (e) {
+    try { await fs.promises.unlink(filePath); } catch { /* never existed */ }
+    throw e;
+  }
 }
 
 export function json(res, code, obj) { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); }
