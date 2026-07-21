@@ -20,6 +20,7 @@ import { openStore } from "./store.js";
 import { createLog } from "./log.js";
 import { isTransport, probeTcp } from "./transport.js";
 import { connectNym } from "./nym.js";
+import { turnIceServers } from "./turn.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.resolve(__dirname, "../web/public");
@@ -45,6 +46,13 @@ const CFG = {
   providers: Number(process.env.PROVIDERS || 2),
   internalToken: process.env.INTERNAL_TOKEN || "",
   nymClientUrl: process.env.NYM_CLIENT_URL || "", // e.g. ws://nym-client:1977 once the sidecar exists
+  // Optional TURN relay for calls stuck behind strict/symmetric NAT, where
+  // public STUN alone can't establish a peer-to-peer path. Empty by default:
+  // calls keep working STUN-only until both are set (see coturn service in
+  // docker-compose.yml).
+  turnSecret: process.env.TURN_SHARED_SECRET || "",
+  turnUris: (process.env.TURN_URIS || "").split(",").map((s) => s.trim()).filter(Boolean),
+  turnTtlSec: Number(process.env.TURN_TTL_SEC || 3600),
 };
 
 function computeVersion() {
@@ -336,6 +344,16 @@ async function main() {
           online[h] = mbks.some((k) => { const s = mbkeySockets.get(k); return !!(s && s.size > 0); });
         }
         return json(res, 200, { online });
+      }
+      // Short-lived TURN relay credentials for calls stuck behind strict NAT
+      // (public STUN alone can't find a peer-to-peer path there). Empty
+      // iceServers when no TURN server is configured; the client then just
+      // stays on its built-in STUN servers as before.
+      if (url.pathname === "/api/turn-credentials") {
+        if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" });
+        const username = await sessionUser(url.searchParams.get("token"));
+        if (!username) return json(res, 401, { error: "not signed in" });
+        return json(res, 200, { iceServers: turnIceServers(CFG) });
       }
       // Encrypted attachment upload/download. The body is opaque ciphertext the
       // client encrypted locally; the decryption key travels only inside the
