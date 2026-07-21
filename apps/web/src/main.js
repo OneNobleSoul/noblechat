@@ -259,7 +259,7 @@ function startApp() {
   $("#app").hidden = false;
   $("#me-handle").textContent = state.user;
   setMobileView("list");
-  connectWS(); wireUI(); renderContacts(); updateNetPanel();
+  connectWS(); wireUI(); renderContacts(); updateNetPanel(); renderDevicesBtn();
   pollPresence(); if (!state.presenceTimer) state.presenceTimer = setInterval(pollPresence, 15000);
   sweepExpiredImages();
   if (!state.expireTimer) state.expireTimer = setInterval(() => { sweepExpiredImages(); updateExpiryTimers(); }, 5000);
@@ -1037,6 +1037,28 @@ function toggleSound() {
   if (state.soundOn) { beep(); toast("message sound on"); } else toast("message sound off");
 }
 
+// ---------- devices ----------
+// Show the button only when this account has more than one device registered,
+// with the count. Clicking removes every device except this one.
+function renderDevicesBtn() {
+  const b = $("#devices-btn"); if (!b) return;
+  const n = state.myBundle.length;
+  if (n > 1) { b.hidden = false; b.textContent = "📱 " + n; b.title = `Sign out your ${n - 1} other device${n > 2 ? "s" : ""}`; }
+  else b.hidden = true;
+}
+async function forgetOtherDevices() {
+  const n = state.myBundle.length;
+  if (n <= 1) { toast("this is your only device"); return; }
+  if (!confirm(`Sign out your ${n - 1} other device${n > 2 ? "s" : ""}? They will need to sign in again.`)) return;
+  try {
+    const r = await fetch("/api/account/forget-others", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: state.token, deviceId: state.deviceId }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { toast(j.error || "could not remove devices"); return; }
+    await loadMyBundle(); renderDevicesBtn();
+    toast(`removed ${j.removed} other device${j.removed === 1 ? "" : "s"}`);
+  } catch { toast("could not remove devices"); }
+}
+
 // ---------- mix viz ----------
 function buildNetViz() {
   const wrap = $("#net-layers"); const cols = state.net.layers.length + 1;
@@ -1255,6 +1277,7 @@ function wireUI() {
   $("#msg-input").addEventListener("keydown", (e) => e.key === "Enter" && sendMessage());
   const cover = $("#cover-toggle"); cover.addEventListener("click", toggleCover); cover.textContent = "cover: " + (state.coverOn ? "on" : "off"); cover.classList.toggle("on", state.coverOn);
   const lo = $("#logout-btn"); if (lo) lo.addEventListener("click", logout);
+  const dvb = $("#devices-btn"); if (dvb) dvb.addEventListener("click", forgetOtherDevices);
   const snd = $("#sound-toggle"); if (snd) snd.addEventListener("click", toggleSound); renderSoundToggle();
   const back = $("#chat-back"); if (back) back.addEventListener("click", () => setMobileView("list"));
   const cmenu = $("#chat-menu"); if (cmenu) cmenu.addEventListener("click", (e) => { e.stopPropagation(); openChatMenu(); });
