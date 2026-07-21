@@ -90,7 +90,11 @@ function beep() {
 async function deriveBlobKey(password, username) {
   const enc = new TextEncoder();
   const base = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]);
-  return crypto.subtle.deriveKey({ name: "PBKDF2", salt: enc.encode("noblechat:" + username), iterations: 100000, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+  // 600k iterations per the current OWASP guidance for PBKDF2-HMAC-SHA256.
+  // Raising this changes the derived key, so blobs written with the old count
+  // (contacts sync, local history) no longer decrypt; the load paths catch that
+  // and simply start fresh, then rewrite with the new key on the next save.
+  return crypto.subtle.deriveKey({ name: "PBKDF2", salt: enc.encode("noblechat:" + username), iterations: 600000, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
 }
 async function exportKey(k) { return toB64(new Uint8Array(await crypto.subtle.exportKey("raw", k))); }
 async function importKey(b64) { return crypto.subtle.importKey("raw", fromB64(b64), { name: "AES-GCM" }, true, ["encrypt", "decrypt"]); }
