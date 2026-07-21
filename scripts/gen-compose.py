@@ -71,17 +71,16 @@ header = """services:
       PER_LAYER: "%d"
       PROVIDERS: "%d"
       MIX_PORT: "8890"
-    expose:
-      - "8790"
+    # Published on loopback only: put your own reverse proxy in front for TLS.
+    # A proxy in another compose project joins via docker-compose.override.yml.
+    ports:
+      - "127.0.0.1:${HTTP_PORT:-8790}:8790"
     networks:
-      - jarvis20_default
       - noblechat_internal
 """ % (LAYERS, PER_LAYER, PROVIDERS)
 
 footer = """
 networks:
-  jarvis20_default:
-    external: true
   noblechat_internal:
     driver: bridge
 
