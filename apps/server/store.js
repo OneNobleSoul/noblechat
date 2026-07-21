@@ -165,6 +165,30 @@ export async function openStore(databaseUrl, { mailboxTtlMs = 7 * 24 * 3600 * 10
       await pool.query("DELETE FROM mailbox WHERE created_at < $1", [now() - mailboxTtlMs]);
       await deleteFilesWhere("created_at < $1", [now() - mailboxTtlMs]);
       await this.pruneExpiredFiles();
+      await this.reconcileOrphanFiles();
+    },
+    // A crash between streamToFile and saveFileMeta leaves ciphertext on disk
+    // with no row; row-based pruning never sees it, so it would leak disk
+    // forever. Sweep files that have no row and are older than one hour (the
+    // age guard avoids racing a normal in-flight upload).
+    async reconcileOrphanFiles(minAgeMs = 3600 * 1000) {
+      let names;
+      try { names = await fs.promises.readdir(filesDir); } catch { return 0; }
+      if (!names.length) return 0;
+      const r = await pool.query("SELECT id FROM files WHERE id = ANY($1)", [names]);
+      const known = new Set(r.rows.map((x) => x.id));
+      const cutoff = now() - minAgeMs;
+      let removed = 0;
+      for (const name of names) {
+        if (known.has(name)) continue;
+        try {
+          const st = await fs.promises.stat(path.join(filesDir, name));
+          if (st.mtimeMs >= cutoff) continue; // too fresh, may be mid-upload
+          await fs.promises.unlink(path.join(filesDir, name));
+          removed++;
+        } catch { /* gone or unreadable: skip */ }
+      }
+      return removed;
     },
     // Deletes attachments whose auto-delete time has passed. Called often so the
     // ciphertext is gone from the server shortly after it expires.
