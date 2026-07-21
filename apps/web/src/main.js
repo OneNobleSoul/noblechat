@@ -228,8 +228,9 @@ async function pollPresence() {
     const r = await fetch(`/api/presence?token=${encodeURIComponent(state.token)}&handles=${encodeURIComponent(handles.join(","))}`);
     if (!r.ok) return;
     const { online } = await r.json();
+    const onSet = new Set(Array.isArray(online) ? online : []); // server returns the online handles as a list
     let changed = false;
-    for (const h of handles) { const on = !!(online && online[h]); if (state.presence.get(h) !== on) { state.presence.set(h, on); changed = true; } }
+    for (const h of handles) { const on = onSet.has(h); if (state.presence.get(h) !== on) { state.presence.set(h, on); changed = true; } }
     if (changed) { renderContacts(); updateChatHeadPresence(); }
   } catch { /* */ }
 }
