@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   generateNodeKey, createPacket, processPacket, PAYLOAD_LEN, HOP_ID_LEN,
 } from "./src/sphinx.js";
-import { randomBytes, utf8ToBytes, bytesToUtf8, concatBytes } from "../crypto/src/util.js";
+import { randomBytes, utf8ToBytes, bytesToUtf8 } from "../crypto/src/util.js";
 
 function nodeWithId() {
   return { key: generateNodeKey(), id: randomBytes(HOP_ID_LEN) };
