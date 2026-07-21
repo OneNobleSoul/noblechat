@@ -366,16 +366,44 @@ function ensureGroup(g) {
   }
 }
 
-function onDeliver(envelope) {
-  let content; try { content = openIncoming(state.identity, envelope); } catch { return; }
+// Check that a decrypted message really was signed by one of `handle`'s
+// device keys. On a miss the cached cards are refreshed once and retried, so
+// a device that re-registered with new keys does not fail forever.
+async function verifySender(handle, verify) {
+  const cards = () => handle === state.user
+    ? [state.identity.card, ...state.myBundle]
+    : (state.contacts.get(handle) || []);
+  const check = () => cards().some((c) => { try { return verify(c.sign); } catch { return false; } });
+  if (check()) return true;
+  if (handle === state.user) await loadMyBundle();
+  else {
+    // deliberately not fetchBundle(): a spoofed sender must not end up saved
+    // as a contact as a side effect of the lookup
+    try {
+      const r = await fetch("/api/bundle?handle=" + encodeURIComponent(handle));
+      if (r.ok) { const j = await r.json(); state.contacts.set(handle, (j.devices || []).map(deserializeCard)); }
+    } catch { /* offline: fall through, check() decides */ }
+  }
+  return check();
+}
+
+async function onDeliver(envelope) {
+  let opened; try { opened = openIncoming(state.identity, envelope); } catch { return; }
+  const content = opened.content;
   if (content.t === "cover") return;
+  const me = state.user;
+  const sender = content.from;
+  if (typeof sender !== "string" || !sender) return;
+  // authenticate the sender before acting on ANYTHING in the message -
+  // otherwise `from` is just a self-claimed string anyone can put there
+  if (!(await verifySender(sender, opened.verify))) return;
   if (content.id && state.seen.has(content.id)) return;
   if (content.id) state.seen.add(content.id);
-  const me = state.user;
-  const sender = content.from || "unknown";
   if (sender !== me && state.blocked.has(sender)) return; // blocked sender: drop
-  if (content.t === "call") { if (sender !== me) handleCallSignal(content); return; }
   const isG = !!(content.g && content.g.id);
+  // a 1:1 message from someone else must actually be addressed to us
+  if (!isG && sender !== me && content.to !== me) return;
+  if (content.t === "call") { if (sender !== me) handleCallSignal(content); return; }
   if (isG) ensureGroup(content.g);
   const convKey = isG ? "g:" + content.g.id : (sender === me ? (content.to || "unknown") : sender);
 
@@ -436,7 +464,7 @@ function applyUnsend(key, c) {
 // using the gateway websocket subscription in both modes; only the uplink is
 // anonymised over Nym at this stage.
 function internalSubmit(card, content) {
-  const { firstNodeId, packet } = buildOutgoing(state.net, card, content);
+  const { firstNodeId, packet } = buildOutgoing(state.net, card, content, state.identity.sign);
   state.ws.send(JSON.stringify({ t: "submit", node: toB64(firstNodeId), packet: serializePacket(packet) }));
 }
 
@@ -477,7 +505,7 @@ const transports = {
       // Not ready yet: keep messaging working over the internal path and warm
       // up the nym client in the background for subsequent sends.
       if (!c || !c.isReady() || !state.nymAddress) { ensureNymClient(); internalSubmit(card, content); return; }
-      const { providerId, inner } = buildInner(card, content);
+      const { providerId, inner } = buildInner(card, content, state.identity.sign);
       const payload = JSON.stringify({ v: 1, p: toB64(providerId), i: toB64(inner) });
       c.send(payload, state.nymAddress).catch(() => internalSubmit(card, content));
     },
