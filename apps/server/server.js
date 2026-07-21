@@ -307,14 +307,14 @@ async function main() {
         const username = await sessionUser(url.searchParams.get("token"));
         if (!username) return json(res, 401, { error: "not signed in" });
         const handles = String(url.searchParams.get("handles") || "").toLowerCase().split(",").filter((h) => HANDLE_RE.test(h)).slice(0, 100);
-        // Prototype-less map: HANDLE_RE allows "__proto__"/"constructor" as
-        // handles, so a plain object would let a caller-supplied name walk the
-        // prototype chain (property injection). Object.create(null) has no
-        // prototype, so every key is an ordinary own property.
-        const online = Object.create(null);
+        // Return the online handles as a list rather than writing them as keys
+        // of an object: a caller-supplied handle used as a dynamic property name
+        // is a property-injection sink (HANDLE_RE even allows "__proto__"). A
+        // list has no such sink and the client just checks membership.
+        const online = [];
         for (const h of handles) {
           const mbks = await store.deviceMbkeys(h);
-          online[h] = mbks.some((k) => { const s = mbkeySockets.get(k); return !!(s && s.size > 0); });
+          if (mbks.some((k) => { const s = mbkeySockets.get(k); return !!(s && s.size > 0); })) online.push(h);
         }
         return json(res, 200, { online });
       }
