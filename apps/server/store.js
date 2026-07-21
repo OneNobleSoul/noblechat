@@ -106,7 +106,15 @@ export async function openStore(databaseUrl, { mailboxTtlMs = 7 * 24 * 3600 * 10
     },
 
     // ---- devices ----
-    async addDevice(deviceId, username, card, mbkey) {
+    async addDevice(deviceId, username, card, mbkey, maxDevices = 0) {
+      // Cap devices per account: unlimited registrations would multiply every
+      // fan-out (a message to the handle goes to each device) and grow the
+      // bundle without bound. Re-registering an existing deviceId is always
+      // allowed (it only updates the card), so we count the OTHER devices.
+      if (maxDevices > 0) {
+        const c = await pool.query("SELECT COUNT(*)::int AS n FROM devices WHERE username=$1 AND device_id<>$2", [username, deviceId]);
+        if (c.rows[0].n >= maxDevices) throw Object.assign(new Error("device limit reached"), { code: "E_DEVICE_LIMIT" });
+      }
       await pool.query(
         `INSERT INTO devices(device_id,username,card,mbkey,created_at) VALUES($1,$2,$3,$4,$5)
          ON CONFLICT(device_id) DO UPDATE SET card=EXCLUDED.card, mbkey=EXCLUDED.mbkey`,

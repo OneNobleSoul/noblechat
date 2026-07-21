@@ -42,6 +42,7 @@ const CFG = {
   // memory or stuffed into Postgres). The compose file mounts a volume on it.
   filesDir: process.env.FILES_DIR || "data/files",
   maxConnPerIp: Number(process.env.MAX_CONN_PER_IP || 20),
+  maxDevicesPerAccount: Number(process.env.MAX_DEVICES_PER_ACCOUNT || 10),
   mailboxTtlMs: Number(process.env.MAILBOX_TTL_MS || 7 * 24 * 3600 * 1000),
   maxPerMailbox: Number(process.env.MAX_PER_MAILBOX || 1000),
   mixPort: Number(process.env.MIX_PORT || 8890),
@@ -287,9 +288,12 @@ async function main() {
           if (await store.isBanned(username)) return json(res, 403, { error: "account suspended" });
           if (typeof b.deviceId !== "string" || !HEX_RE.test(b.deviceId)) return json(res, 400, { error: "bad device id" });
           if (!validCard(b.card) || b.card.handle.toLowerCase() !== username) return json(res, 400, { error: "card must match your handle" });
-          await store.addDevice(b.deviceId, username, b.card, `${b.card.providerId}:${b.card.mailbox}`);
+          await store.addDevice(b.deviceId, username, b.card, `${b.card.providerId}:${b.card.mailbox}`, CFG.maxDevicesPerAccount);
           return json(res, 200, { ok: true });
-        } catch (e) { return json(res, 400, { error: "bad request" }); }
+        } catch (e) {
+          if (e && e.code === "E_DEVICE_LIMIT") return json(res, 409, { error: `device limit reached (max ${CFG.maxDevicesPerAccount})` });
+          return json(res, 400, { error: "bad request" });
+        }
       }
       if (url.pathname === "/api/bundle") {
         if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" });
