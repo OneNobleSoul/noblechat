@@ -123,6 +123,21 @@ export async function openStore(databaseUrl, { mailboxTtlMs = 7 * 24 * 3600 * 10
     async removeDevice(deviceId, username) {
       await pool.query("DELETE FROM devices WHERE device_id=$1 AND username=$2", [deviceId, username]);
     },
+    // Remove every device of an account (admin action). Returns the mbkeys so
+    // the caller can drop any live subscriptions; the owner re-registers a
+    // single device the next time a client loads.
+    async clearDevices(username) {
+      const mbk = await this.deviceMbkeys(username);
+      await pool.query("DELETE FROM devices WHERE username=$1", [username]);
+      return mbk;
+    },
+    // Remove all but one device of an account (user "sign out other devices").
+    // Returns the removed mbkeys so their subscriptions can be dropped.
+    async clearOtherDevices(username, keepDeviceId) {
+      const r = await pool.query("SELECT mbkey FROM devices WHERE username=$1 AND device_id<>$2 AND mbkey IS NOT NULL", [username, keepDeviceId]);
+      await pool.query("DELETE FROM devices WHERE username=$1 AND device_id<>$2", [username, keepDeviceId]);
+      return r.rows.map((x) => x.mbkey);
+    },
     async deviceBundle(username) { // public cards for a handle
       const r = await pool.query("SELECT card FROM devices WHERE username=$1 ORDER BY created_at ASC", [username]);
       return r.rows.map((x) => JSON.parse(x.card));

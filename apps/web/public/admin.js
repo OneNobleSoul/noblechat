@@ -129,9 +129,10 @@ async function loadUsers() {
     const td = document.createElement("td"); td.style.textAlign = "right";
     const adm = document.createElement("button"); adm.className = "btn ghost"; adm.textContent = u.is_admin ? "Revoke admin" : "Make admin";
     adm.onclick = () => setAdmin(u.username, !u.is_admin);
+    const dev = document.createElement("button"); dev.className = "btn ghost"; dev.textContent = "Clear devices"; dev.onclick = () => act("cleardevices", u.username);
     const ban = document.createElement("button"); ban.className = "btn warn"; ban.textContent = "Ban"; ban.onclick = () => act("ban", u.username);
     const del = document.createElement("button"); del.className = "btn danger"; del.textContent = "Delete"; del.onclick = () => act("delete", u.username);
-    td.appendChild(adm); td.appendChild(ban); td.appendChild(del); tr.appendChild(td); tb.appendChild(tr);
+    td.appendChild(adm); td.appendChild(dev); td.appendChild(ban); td.appendChild(del); tr.appendChild(td); tb.appendChild(tr);
   }
 
   const bt = $("#bans"); bt.innerHTML = "";
@@ -154,6 +155,7 @@ async function act(kind, handle) {
   if (kind === "ban") { const reason = prompt("Ban " + handle + " - reason (optional):", ""); if (reason === null) return; await api("/api/admin/ban", "POST", { handle, reason }); }
   else if (kind === "delete") { if (!confirm("Delete account " + handle + "? Removes all its devices and queued messages.")) return; await api("/api/admin/delete", "POST", { handle }); }
   else if (kind === "unban") { await api("/api/admin/unban", "POST", { handle }); }
+  else if (kind === "cleardevices") { if (!confirm("Clear all devices for " + handle + "? They will re-register one device next time they open the app.")) return; await api("/api/admin/cleardevices", "POST", { handle }); }
   await refresh();
 }
 

@@ -295,6 +295,21 @@ async function main() {
           return json(res, 400, { error: "bad request" });
         }
       }
+      // "Sign out my other devices": drop every device of this account except
+      // the one making the request. Clears out the stale/phantom devices a user
+      // has accumulated without touching the device they are on.
+      if (url.pathname === "/api/account/forget-others" && req.method === "POST") {
+        if (!httpLimit(ip, 2)) return json(res, 429, { error: "rate limited" });
+        try {
+          const b = JSON.parse(await readBody(req, CFG.maxBodyBytes));
+          const username = await sessionUser(b.token);
+          if (!username) return json(res, 401, { error: "not signed in" });
+          if (typeof b.deviceId !== "string" || !HEX_RE.test(b.deviceId)) return json(res, 400, { error: "bad device id" });
+          const mbk = await store.clearOtherDevices(username, b.deviceId);
+          for (const k of mbk) { const set = mbkeySockets.get(k); if (set) for (const ws of set) { try { ws.close(4005, "signed out elsewhere"); } catch { /* */ } } }
+          return json(res, 200, { ok: true, removed: mbk.length });
+        } catch (e) { return json(res, 400, { error: "bad request" }); }
+      }
       if (url.pathname === "/api/bundle") {
         if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" });
         const handle = (url.searchParams.get("handle") || "").toLowerCase();
@@ -488,6 +503,7 @@ async function main() {
           if (url.pathname === "/api/admin/unban") { await store.unbanAccount(handle); await refreshBans(); elog.add("info", "account unbanned", handle); return json(res, 200, { ok: true }); }
           if (url.pathname === "/api/admin/setadmin") { if (!HANDLE_RE.test(handle)) return json(res, 400, { error: "bad handle" }); const ok = await store.setAdmin(handle, !!body.admin); if (!ok) return json(res, 404, { error: "no such account" }); elog.add("warn", body.admin ? "admin granted" : "admin revoked", handle); return json(res, 200, { ok: true }); }
           if (url.pathname === "/api/admin/delete") { const mbk = await store.deleteAccount(handle); await refreshBans(); elog.add("warn", "account deleted", handle); for (const k of mbk) { const set = mbkeySockets.get(k); if (set) for (const ws of set) { try { ws.close(4004, "removed"); } catch { /* */ } } } return json(res, 200, { ok: true }); }
+          if (url.pathname === "/api/admin/cleardevices") { if (!HANDLE_RE.test(handle)) return json(res, 400, { error: "bad handle" }); const mbk = await store.clearDevices(handle); elog.add("warn", "devices cleared", handle); for (const k of mbk) { const set = mbkeySockets.get(k); if (set) for (const ws of set) { try { ws.close(4005, "devices cleared"); } catch { /* */ } } } return json(res, 200, { ok: true, cleared: mbk.length }); }
         }
         return json(res, 404, { error: "not found" });
       }
