@@ -57,9 +57,9 @@ export async function generateIdentityStaged(handle, providerId, onProgress = ()
 
 // Build a mix packet carrying an end-to-end encrypted message for `recipientCard`.
 // `net` must expose pickPath(providerId).
-export function buildOutgoing(net, recipientCard, contentObj) {
+export function buildOutgoing(net, recipientCard, contentObj, senderSignKp) {
   const path = net.pickPath(recipientCard.providerId);
-  const envelope = sealEnvelope(recipientCard.kem, encodeContent(contentObj));
+  const envelope = sealEnvelope(recipientCard.kem, encodeContent(contentObj), senderSignKp);
   const inner = packInner(recipientCard.mailbox, envelope);
   const packet = createPacket(path, inner);
   return { firstNodeId: path[0].id, packet };
@@ -71,20 +71,23 @@ export function buildOutgoing(net, recipientCard, contentObj) {
 // providerId (to key the mailbox) plus the inner bytes. The end-to-end
 // envelope is identical to the internal path, so the server still learns
 // nothing about content.
-export function buildInner(recipientCard, contentObj) {
-  const envelope = sealEnvelope(recipientCard.kem, encodeContent(contentObj));
+export function buildInner(recipientCard, contentObj, senderSignKp) {
+  const envelope = sealEnvelope(recipientCard.kem, encodeContent(contentObj), senderSignKp);
   const inner = packInner(recipientCard.mailbox, envelope);
   return { providerId: recipientCard.providerId, inner };
 }
 
-// Decrypt a delivered envelope with our own keys.
+// Decrypt a delivered envelope with our own keys. Returns { content, verify }:
+// verify(signBundle) must return true for one of the claimed sender's device
+// cards before content.from may be believed.
 export function openIncoming(identity, envelope) {
-  return decodeContent(openEnvelope(identity.kem, envelope));
+  const { content, verify } = openEnvelope(identity.kem, envelope);
+  return { content: decodeContent(content), verify };
 }
 
 // A cover-traffic loop: a real, indistinguishable packet addressed to ourselves.
 // The recipient (us) recognises the {t:"cover"} marker after decryption and
 // silently drops it. To the network it is identical to a genuine message.
 export function buildCoverLoop(net, identity) {
-  return buildOutgoing(net, identity.card, { t: "cover", ts: 0 });
+  return buildOutgoing(net, identity.card, { t: "cover", ts: 0 }, identity.sign);
 }

@@ -19,7 +19,10 @@ export const K = 16; // security parameter / block half
 export const MAX_HOPS = 5;
 export const R = MAX_HOPS;
 export const BETA_LEN = (2 * R + 1) * K; // 176
-export const PAYLOAD_LEN = 2048; // holds a full ML-KEM-768 ciphertext (1088B) + content
+// Holds a full ML-KEM-768 ciphertext (1088B) + hybrid signature (Ed25519 64B
+// + ML-DSA-65 3309B) + content, with headroom for file metadata and group
+// member lists. Constant for every packet, so size leaks nothing.
+export const PAYLOAD_LEN = 8192;
 export const HOP_ID_LEN = K; // 16
 export const HEADER_LEN = 32 + BETA_LEN + K; // alpha + beta + gamma
 
@@ -135,7 +138,10 @@ function createHeader(path, secrets, alphas) {
 
 // ---- payload onion (length-preserving) -----------------------------------
 function onionEncrypt(secrets, inner) {
-  let p = inner.slice(0, PAYLOAD_LEN);
+  // refuse oversized payloads loudly - silently truncating would corrupt the
+  // envelope and the message would vanish without a trace at the recipient
+  if (inner.length > PAYLOAD_LEN) throw new Error(`payload too large: ${inner.length} > ${PAYLOAD_LEN}`);
+  let p = inner;
   if (p.length < PAYLOAD_LEN) p = concatBytes(p, new Uint8Array(PAYLOAD_LEN - p.length));
   for (let i = secrets.length - 1; i >= 0; i--) {
     p = xorBytes(p, prg(subkey("pi", secrets[i]), PAYLOAD_LEN));
