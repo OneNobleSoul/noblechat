@@ -251,6 +251,7 @@ export async function openStore(databaseUrl, { mailboxTtlMs = 7 * 24 * 3600 * 10
       const mbk = await this.deviceMbkeys(username);
       await pool.query("DELETE FROM sessions WHERE username=$1", [username]);
       await pool.query("DELETE FROM blobs WHERE username=$1", [username]);
+      await pool.query("DELETE FROM settings WHERE key=$1", [`banreason:${username}`]); // don't leave a ban-reason row behind
       await pool.query("DELETE FROM accounts WHERE username=$1", [username]); // devices cascade
       for (const k of mbk) await pool.query("DELETE FROM mailbox WHERE mbkey=$1", [k]);
       return mbk;
