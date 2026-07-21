@@ -18,7 +18,7 @@ const GATE_OK = "noblechat:gate-ok";
 
 const state = {
   ws: null, net: null, meanDelayMs: 60,
-  token: null, user: null, deviceId: null, identity: null, blobKey: null,
+  token: null, user: null, deviceId: null, identity: null, blobKey: null, blobKeyLegacy: null,
   myBundle: [], contacts: new Map(), convos: new Map(), active: null,
   coverOn: true, coverTimer: null, netCols: [], stats: { sent: 0, cover: 0, recv: 0 },
   seen: new Set(), version: null, maintenance: false, statusTimer: null, authMode: "login",
@@ -87,14 +87,26 @@ function beep() {
 }
 
 // ---- contacts-blob crypto (client-side; server only sees ciphertext) ----
-async function deriveBlobKey(password, username) {
+// 600k iterations per current OWASP guidance for PBKDF2-HMAC-SHA256. The
+// previous 100k count is kept as PBKDF2_LEGACY so a fresh login can still open
+// blobs written before the bump and migrate them (see decryptBlobMigrating).
+const PBKDF2_ITERS = 600000;
+const PBKDF2_LEGACY = 100000;
+async function deriveBlobKey(password, username, iterations = PBKDF2_ITERS) {
   const enc = new TextEncoder();
   const base = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]);
-  // 600k iterations per the current OWASP guidance for PBKDF2-HMAC-SHA256.
-  // Raising this changes the derived key, so blobs written with the old count
-  // (contacts sync, local history) no longer decrypt; the load paths catch that
-  // and simply start fresh, then rewrite with the new key on the next save.
-  return crypto.subtle.deriveKey({ name: "PBKDF2", salt: enc.encode("noblechat:" + username), iterations: 600000, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+  return crypto.subtle.deriveKey({ name: "PBKDF2", salt: enc.encode("noblechat:" + username), iterations, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+}
+// Decrypt a blob with the current key; if that fails and we hold a legacy
+// fallback key (only set on a fresh password login), try that too. Returns
+// { data, migrated } - migrated:true means the caller should re-encrypt the
+// data with the current key so the old-iteration copy is replaced.
+async function decryptBlobMigrating(b64) {
+  try { return { data: await decryptBlob(state.blobKey, b64), migrated: false }; }
+  catch (e) {
+    if (!state.blobKeyLegacy) throw e;
+    return { data: await decryptBlob(state.blobKeyLegacy, b64), migrated: true };
+  }
 }
 async function exportKey(k) { return toB64(new Uint8Array(await crypto.subtle.exportKey("raw", k))); }
 async function importKey(b64) { return crypto.subtle.importKey("raw", fromB64(b64), { name: "AES-GCM" }, true, ["encrypt", "decrypt"]); }
@@ -141,7 +153,7 @@ async function init() {
   }
   showAuth();
 }
-function clearSession() { for (const k of Object.values(K)) ls.del(k); state.token = state.user = state.identity = state.blobKey = null; }
+function clearSession() { for (const k of Object.values(K)) ls.del(k); state.token = state.user = state.identity = state.blobKey = state.blobKeyLegacy = null; }
 
 // ---------- auth ui ----------
 function showAuth() {
@@ -192,6 +204,10 @@ async function doAuth() {
     }
     state.identity = id;
     state.blobKey = await deriveBlobKey(pass, user); ls.set(K.bkey, await exportKey(state.blobKey));
+    // We have the password here, so also derive the old-iteration key to open
+    // and migrate any blobs written before the 600k bump. Auto-login (no
+    // password) skips this: its cached key already matches its stored blobs.
+    state.blobKeyLegacy = await deriveBlobKey(pass, user, PBKDF2_LEGACY);
 
     await registerDevice();
     await afterAuth();
@@ -293,10 +309,11 @@ async function loadConvos() {
   try {
     const raw = ls.get(K.history);
     if (!raw) return;
-    const obj = await decryptBlob(state.blobKey, raw);
+    const { data: obj, migrated } = await decryptBlobMigrating(raw);
     for (const [h, arr] of Object.entries(obj)) {
       if (Array.isArray(arr)) { state.convos.set(h, arr); for (const m of arr) markSeen(m.id); }
     }
+    if (migrated) saveConvos(); // rewrite history under the current key
   } catch { /* */ }
 }
 
@@ -315,7 +332,7 @@ async function loadContactsFromBlob() {
     if (!r.ok) return;
     const { blob } = await r.json();
     if (!blob) return;
-    const data = await decryptBlob(state.blobKey, blob);
+    const { data, migrated } = await decryptBlobMigrating(blob);
     // v1 blobs were a bare array of handles; v2 carries mutes/blocks too.
     const handles = Array.isArray(data) ? data : (data.contacts || []);
     if (!Array.isArray(data)) {
@@ -326,6 +343,9 @@ async function loadContactsFromBlob() {
     }
     for (const h of handles) if (!state.contacts.has(h) && !state.blocked.has(h)) await fetchBundle(h, { silent: true, noSave: true });
     renderContacts();
+    // re-encrypt the server blob under the current key now that the migrated
+    // state (contacts, mutes, blocks, groups) is fully loaded
+    if (migrated) uploadContactsBlob();
   } catch { /* */ }
 }
 
