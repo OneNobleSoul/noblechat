@@ -143,3 +143,38 @@ test("readBodyBuffer returns raw bytes, not decoded text", () => withServer(
     assert.deepEqual([...back], [...payload]);
   },
 ));
+
+// streamToFile is the upload path's memory fix: the body goes chunk by chunk
+// to disk instead of being buffered whole. Exercise it over a real socket.
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { streamToFile } from "../apps/server/util.js";
+
+const tmpFile = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), "nc-up-")), "f");
+
+test("streamToFile writes the body to disk and reports its size", () => withServer(
+  async (req, res) => {
+    const dest = tmpFile();
+    const size = await streamToFile(req, dest, 1024);
+    const back = fs.readFileSync(dest);
+    res.end(JSON.stringify({ size, bytes: [...back] }));
+  },
+  async (port) => {
+    const payload = new Uint8Array([7, 0, 255, 42]);
+    const res = await fetch(`http://127.0.0.1:${port}/`, { method: "POST", body: payload });
+    const j = await res.json();
+    assert.equal(j.size, 4);
+    assert.deepEqual(j.bytes, [...payload]);
+  },
+));
+
+test("streamToFile rejects past the limit and removes the partial file", async () => {
+  const { PassThrough } = await import("node:stream");
+  const body = new PassThrough();
+  const dest = tmpFile();
+  const pending = streamToFile(body, dest, 4);
+  body.write(Buffer.from("way more than four bytes"));
+  await assert.rejects(pending, /body too large/);
+  assert.equal(fs.existsSync(dest), false);
+});

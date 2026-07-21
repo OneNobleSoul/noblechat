@@ -39,6 +39,9 @@ services:
       NYM_CLIENT_URL: ${NYM_CLIENT_URL:-}
       TURN_SHARED_SECRET: ${TURN_SHARED_SECRET:-}
       TURN_URIS: ${TURN_URIS:-}
+      FILES_DIR: /app/data/files
+    volumes:
+      - noblechat-files:/app/data/files
     expose:
       - "8790"
     networks:
@@ -298,4 +301,5 @@ networks:
 
 volumes:
   noblechat-db:
+  noblechat-files:
   nym-client-data:

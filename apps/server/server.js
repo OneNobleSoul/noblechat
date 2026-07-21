@@ -21,7 +21,7 @@ import { createLog } from "./log.js";
 import { isTransport, probeTcp } from "./transport.js";
 import { connectNym } from "./nym.js";
 import { turnIceServers } from "./turn.js";
-import { HANDLE_RE, B64_RE, HEX_RE, isB64, validCard, readBody, readBodyBuffer, json, timingEqual, hashPassword, verifyPassword, clampExpireSec } from "./util.js";
+import { HANDLE_RE, B64_RE, HEX_RE, isB64, validCard, readBody, streamToFile, json, timingEqual, hashPassword, verifyPassword, clampExpireSec } from "./util.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.resolve(__dirname, "../web/public");
@@ -38,6 +38,9 @@ const CFG = {
   maxWsMsgBytes: Number(process.env.MAX_WS_MSG_BYTES || 128 * 1024),
   // 500 MB of plaintext + a little headroom for the AES-GCM iv/tag the client prepends.
   maxUploadBytes: Number(process.env.MAX_UPLOAD_BYTES || 501 * 1024 * 1024),
+  // Attachment ciphertext lives here as plain files (streamed, never held in
+  // memory or stuffed into Postgres). The compose file mounts a volume on it.
+  filesDir: process.env.FILES_DIR || "data/files",
   maxConnPerIp: Number(process.env.MAX_CONN_PER_IP || 20),
   mailboxTtlMs: Number(process.env.MAILBOX_TTL_MS || 7 * 24 * 3600 * 1000),
   maxPerMailbox: Number(process.env.MAX_PER_MAILBOX || 1000),
@@ -106,7 +109,7 @@ function rateLimiter({ capacity, refillPerSec }) {
   };
 }
 async function main() {
-  const store = await openStore(CFG.databaseUrl, { mailboxTtlMs: CFG.mailboxTtlMs, maxPerMailbox: CFG.maxPerMailbox });
+  const store = await openStore(CFG.databaseUrl, { mailboxTtlMs: CFG.mailboxTtlMs, maxPerMailbox: CFG.maxPerMailbox, filesDir: CFG.filesDir });
   const mailboxStore = {
     push: (k, env) => store.pushEnvelope(k, toB64(env)),
     drain: (k) => store.drainEnvelopes(k).then((list) => list.map(fromB64)),
@@ -329,16 +332,20 @@ async function main() {
         const username = await sessionUser(url.searchParams.get("token"));
         if (!username) return json(res, 401, { error: "not signed in" });
         if (await store.isBanned(username)) return json(res, 403, { error: "account suspended" });
-        let buf;
-        try { buf = await readBodyBuffer(req, CFG.maxUploadBytes); } catch { return json(res, 413, { error: "file too large" }); }
-        if (!buf.length) return json(res, 400, { error: "empty" });
         const mime = String(req.headers["x-file-type"] || "application/octet-stream").slice(0, 100);
         // Optional auto-delete: the client sends how many seconds the ciphertext
         // should live. Clamp to <= 30 days; 0/absent means keep for the usual TTL.
         const expSec = clampExpireSec(req.headers["x-expire-sec"], 30 * 24 * 3600);
         const expiresAt = expSec > 0 ? Date.now() + expSec * 1000 : null;
         const id = crypto.randomBytes(18).toString("hex");
-        try { await store.saveFile(id, mime, buf, expiresAt); } catch { return json(res, 500, { error: "store failed" }); }
+        // stream the ciphertext straight to disk; the process never holds more
+        // than a few chunks of it in memory
+        let size;
+        try { size = await streamToFile(req, store.filePath(id), CFG.maxUploadBytes); }
+        catch { return json(res, 413, { error: "file too large" }); }
+        if (!size) { await fs.promises.unlink(store.filePath(id)).catch(() => {}); return json(res, 400, { error: "empty" }); }
+        try { await store.saveFileMeta(id, mime, size, expiresAt); }
+        catch { await fs.promises.unlink(store.filePath(id)).catch(() => {}); return json(res, 500, { error: "store failed" }); }
         return json(res, 200, { id });
       }
       if (url.pathname === "/api/file") {
@@ -347,8 +354,19 @@ async function main() {
         if (!/^[a-f0-9]{36}$/.test(id)) { res.writeHead(400).end(); return; }
         const f = await store.getFile(id);
         if (!f) { res.writeHead(404).end(); return; }
-        res.writeHead(200, { "content-type": "application/octet-stream", "x-file-type": f.mime, "Cache-Control": "private, max-age=86400" });
-        res.end(f.data);
+        const headers = { "content-type": "application/octet-stream", "x-file-type": f.mime, "Cache-Control": "private, max-age=86400" };
+        if (f.data) { res.writeHead(200, headers); res.end(f.data); return; } // legacy row: bytes still in the DB
+        const rs = fs.createReadStream(store.filePath(id));
+        rs.on("open", () => {
+          if (f.size != null) headers["content-length"] = String(f.size);
+          res.writeHead(200, headers);
+          rs.pipe(res);
+        });
+        rs.on("error", async () => {
+          // metadata without bytes (disk wiped?): drop the orphan row
+          await store.removeFile(id).catch(() => {});
+          if (!res.headersSent) { res.writeHead(404).end(); } else res.destroy();
+        });
         return;
       }
       if (url.pathname === "/api/account/blob") {

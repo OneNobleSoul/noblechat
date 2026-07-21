@@ -71,6 +71,9 @@ header = """services:
       PER_LAYER: "%d"
       PROVIDERS: "%d"
       MIX_PORT: "8890"
+      FILES_DIR: /app/data/files
+    volumes:
+      - noblechat-files:/app/data/files
     expose:
       - "8790"
     networks:
@@ -87,6 +90,7 @@ networks:
 
 volumes:
   noblechat-db:
+  noblechat-files:
 """
 
 out = header + "\n" + "\n".join(node_block(l) for l in nodes) + footer
