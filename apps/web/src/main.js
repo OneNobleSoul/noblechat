@@ -153,7 +153,15 @@ async function init() {
   }
   showAuth();
 }
-function clearSession() { for (const k of Object.values(K)) ls.del(k); state.token = state.user = state.identity = state.blobKey = state.blobKeyLegacy = null; }
+// Keep the device identity (deviceId + keypair) across logout and session loss
+// so logging back in updates the SAME device row instead of registering a new
+// device every time. Only the session token and password-derived material are
+// cleared. A different handle logging in on this browser gets a fresh device
+// (see doAuth), so the retained keypair is never reused across handles.
+function clearSession() {
+  for (const k of Object.values(K)) if (k !== K.dev && k !== K.id) ls.del(k);
+  state.token = state.user = state.identity = state.blobKey = state.blobKeyLegacy = null;
+}
 
 // ---------- auth ui ----------
 function showAuth() {
@@ -191,17 +199,22 @@ async function doAuth() {
 
     state.token = j.token; state.user = user;
     ls.set(K.token, j.token); ls.set(K.user, user);
-    state.deviceId = ls.get(K.dev) || randHex(16); ls.set(K.dev, state.deviceId);
-
-    // reuse this device's keypair if it already belongs to this handle, else make one
+    // Reuse this browser's device identity (keypair + deviceId) only when the
+    // stored keypair belongs to this handle, so logging back in updates the
+    // same device row rather than spawning a new one. A different handle - or
+    // a first login - gets a fresh deviceId and keypair.
     let id = null; const idRaw = ls.get(K.id);
     if (idRaw) { try { const cand = deserializeIdentity(JSON.parse(idRaw)); if (cand.handle === user && state.net.providers.some((p) => toB64(p.id) === toB64(cand.providerId))) id = cand; } catch { /* */ } }
-    if (!id) {
+    if (id) {
+      state.deviceId = ls.get(K.dev) || randHex(16);
+    } else {
+      state.deviceId = randHex(16); // fresh device for a new handle on this browser
       showKeygen(0, "starting");
       const provider = state.net.providers[simpleHash(user) % state.net.providers.length];
       id = await generateIdentityStaged(user, provider.id, (p, l) => showKeygen(p, l));
       ls.set(K.id, JSON.stringify(serializeIdentity(id)));
     }
+    ls.set(K.dev, state.deviceId);
     state.identity = id;
     state.blobKey = await deriveBlobKey(pass, user); ls.set(K.bkey, await exportKey(state.blobKey));
     // We have the password here, so also derive the old-iteration key to open
