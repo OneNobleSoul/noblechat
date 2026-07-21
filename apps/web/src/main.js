@@ -997,16 +997,35 @@ function emitPacket(kind) {
 function pulseHop(label) { let col = -1; const m = /^mix-L(\d+)/.exec(label); if (m) col = Number(m[1]); else if (label.startsWith("provider")) col = state.net.layers.length; const node = state.netCols[col]; if (!node) return; node.classList.add("pulse"); setTimeout(() => node.classList.remove("pulse"), 320); }
 
 // ---------- voice / video calls (WebRTC, signalled over the E2E channel) ----------
-const ICE_SERVERS = [
+const STUN_SERVERS = [
   { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
 ];
+// Public STUN only helps two peers behind "easy" NATs find each other; behind
+// a strict/symmetric NAT (common on mobile carriers and some routers) it
+// never connects and a call just hangs at "connecting". A TURN relay fixes
+// that by giving both sides one straightforward hop instead. The server hands
+// out short-lived credentials (see /api/turn-credentials); if no TURN server
+// is configured there, this simply returns [] and calls stay STUN-only.
+let iceServersCache = null;
+async function fetchIceServers() {
+  const now = Date.now();
+  if (iceServersCache && now - iceServersCache.at < 5 * 60 * 1000) return iceServersCache.servers;
+  let extra = [];
+  try {
+    const r = await fetch(`/api/turn-credentials?token=${encodeURIComponent(state.token)}`);
+    if (r.ok) { const b = await r.json(); if (Array.isArray(b.iceServers)) extra = b.iceServers; }
+  } catch { /* TURN is optional, STUN-only still works */ }
+  const servers = [...STUN_SERVERS, ...extra];
+  iceServersCache = { servers, at: now };
+  return servers;
+}
 function sendCallSignal(peer, obj) {
   const content = { v: 1, t: "call", from: state.user, to: peer, id: randHex(8), ts: Date.now(), ...obj };
   for (const card of (state.contacts.get(peer) || [])) sendToCard(card, content);
   state.seen.add(content.id);
 }
-function newPeerConnection(peer, callId) {
-  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+async function newPeerConnection(peer, callId) {
+  const pc = new RTCPeerConnection({ iceServers: await fetchIceServers() });
   pc.onicecandidate = (e) => { if (e.candidate) sendCallSignal(peer, { sub: "ice", callId, candidate: JSON.stringify(e.candidate) }); };
   pc.ontrack = (e) => {
     const c = state.call; if (!c) return;
@@ -1034,7 +1053,7 @@ async function startCall(peer, video) {
   try {
     const stream = await getLocalMedia(video);
     state.call.localStream = stream;
-    const pc = newPeerConnection(peer, callId); state.call.pc = pc;
+    const pc = await newPeerConnection(peer, callId); state.call.pc = pc;
     for (const t of stream.getTracks()) pc.addTrack(t, stream);
     showCall(); renderCall();
     const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
@@ -1058,7 +1077,7 @@ async function acceptCall() {
   const call = state.call; if (!call || call.role !== "callee") return;
   try {
     const stream = await getLocalMedia(call.video); call.localStream = stream;
-    const pc = newPeerConnection(call.peer, call.callId); call.pc = pc;
+    const pc = await newPeerConnection(call.peer, call.callId); call.pc = pc;
     for (const t of stream.getTracks()) pc.addTrack(t, stream);
     await pc.setRemoteDescription(JSON.parse(call.offer));
     const answer = await pc.createAnswer(); await pc.setLocalDescription(answer);
