@@ -37,6 +37,8 @@ services:
       PROVIDERS: "2"
       MIX_PORT: "8890"
       NYM_CLIENT_URL: ${NYM_CLIENT_URL:-}
+      TURN_SHARED_SECRET: ${TURN_SHARED_SECRET:-}
+      TURN_URIS: ${TURN_URIS:-}
     expose:
       - "8790"
     networks:
@@ -246,6 +248,47 @@ services:
       interval: 20s
       timeout: 5s
       retries: 5
+
+  # TURN relay for calls stuck behind strict/symmetric NAT, where public STUN
+  # alone can't find a peer-to-peer path (see apps/server/turn.js). Runs on
+  # the host network so relay candidates carry the host's real public IP;
+  # Docker's bridge NAT would otherwise double-NAT them and the relay
+  # wouldn't be reachable. Stays idle (no listener) until TURN_SHARED_SECRET
+  # is set in .env, so an unconfigured deploy can't end up as an open relay.
+  coturn:
+    image: coturn/coturn:4.6.2
+    container_name: nc-coturn
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TURN_SHARED_SECRET: ${TURN_SHARED_SECRET:-}
+      TURN_REALM: ${TURN_REALM:-chat.noblesoul.tech}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -z "$$TURN_SHARED_SECRET" ]; then
+          echo "TURN_SHARED_SECRET not set, coturn staying idle (calls remain STUN-only)"
+          exec sleep infinity
+        fi
+        exec turnserver -n \
+          --listening-port=3478 \
+          --min-port=49160 --max-port=49200 \
+          --realm="$$TURN_REALM" \
+          --use-auth-secret --static-auth-secret="$$TURN_SHARED_SECRET" \
+          --no-cli --fingerprint --no-multicast-peers \
+          --no-tlsv1 --no-tlsv1_1 \
+          --denied-peer-ip=0.0.0.0-0.255.255.255 \
+          --denied-peer-ip=10.0.0.0-10.255.255.255 \
+          --denied-peer-ip=100.64.0.0-100.127.255.255 \
+          --denied-peer-ip=127.0.0.0-127.255.255.255 \
+          --denied-peer-ip=169.254.0.0-169.254.255.255 \
+          --denied-peer-ip=172.16.0.0-172.31.255.255 \
+          --denied-peer-ip=192.0.0.0-192.0.0.255 \
+          --denied-peer-ip=192.168.0.0-192.168.255.255 \
+          --denied-peer-ip=198.18.0.0-198.19.255.255 \
+          --denied-peer-ip=::1 \
+          --denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff \
+          --denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
 
 networks:
   jarvis20_default:
