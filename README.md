@@ -102,7 +102,14 @@ Requires Node.js 20 or newer.
 npm install
 npm test            # unit tests for crypto, sphinx, and the router
 npm run build:web   # bundle the browser client
-npm run smoke       # optional headless end to end check
+```
+
+`npm run smoke` drives a RUNNING deployment end to end like a real browser
+client (register, subscribe, send through the mix, verify the sender
+signature, upload/download a file). Start the compose stack first, then:
+
+```sh
+SMOKE_URL=http://localhost:8790 npm run smoke
 ```
 
 ## Clients
