@@ -28,6 +28,12 @@ reaches a stable release.
   risk running the gateway out of memory.
 - Password hashing runs off the event loop (async scrypt), so a login can no
   longer stall message routing.
+- The client key that encrypts the contacts-sync blob and local chat history is
+  now derived with 600k PBKDF2 iterations (was 100k), per current OWASP
+  guidance. A fresh login also derives the old-iteration key once and uses it to
+  transparently decrypt and re-encrypt any pre-existing blobs, so contacts and
+  history migrate without loss; auto-login is unaffected (its cached key already
+  matches its blobs).
 
 ### Breaking
 - The end-to-end envelope format changed (a version byte plus the sender
