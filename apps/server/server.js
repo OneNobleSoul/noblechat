@@ -346,7 +346,12 @@ async function main() {
         // than a few chunks of it in memory
         let size;
         try { size = await streamToFile(req, store.filePath(id), CFG.maxUploadBytes); }
-        catch { return json(res, 413, { error: "file too large" }); }
+        catch (e) {
+          // the client's fault (too big) vs. ours (disk full, aborted stream)
+          if (e && e.code === "E_TOO_LARGE") return json(res, 413, { error: "file too large" });
+          elog.add("error", "upload failed", String(e && e.message || e));
+          return json(res, 500, { error: "upload failed" });
+        }
         if (!size) { await fs.promises.unlink(store.filePath(id)).catch(() => {}); return json(res, 400, { error: "empty" }); }
         try { await store.saveFileMeta(id, mime, size, expiresAt); }
         catch { await fs.promises.unlink(store.filePath(id)).catch(() => {}); return json(res, 500, { error: "store failed" }); }

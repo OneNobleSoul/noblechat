@@ -30,6 +30,18 @@ const state = {
 
 const ls = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* */ } }, del: (k) => { try { localStorage.removeItem(k); } catch { /* */ } } };
 const randHex = (n) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, "0")).join("");
+// Remember a message id for dedup, capping the set so a long-lived session
+// can't grow it without bound. A Set keeps insertion order, so evicting from
+// the front drops the oldest ids first; pushMessage's own id check is a second
+// guard so an evicted-then-reseen id still won't duplicate a visible message.
+const SEEN_CAP = 10000;
+function markSeen(id) {
+  if (!id) return;
+  state.seen.add(id);
+  if (state.seen.size > SEEN_CAP) {
+    for (const old of state.seen) { state.seen.delete(old); if (state.seen.size <= SEEN_CAP) break; }
+  }
+}
 function toast(msg) { const t = $("#toast"); t.hidden = false; t.textContent = msg; requestAnimationFrame(() => t.classList.add("show")); clearTimeout(toast._t); toast._t = setTimeout(() => { t.classList.remove("show"); setTimeout(() => (t.hidden = true), 250); }, 2600); }
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 function simpleHash(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; }
@@ -279,7 +291,7 @@ async function loadConvos() {
     if (!raw) return;
     const obj = await decryptBlob(state.blobKey, raw);
     for (const [h, arr] of Object.entries(obj)) {
-      if (Array.isArray(arr)) { state.convos.set(h, arr); for (const m of arr) if (m.id) state.seen.add(m.id); }
+      if (Array.isArray(arr)) { state.convos.set(h, arr); for (const m of arr) markSeen(m.id); }
     }
   } catch { /* */ }
 }
@@ -398,7 +410,7 @@ async function onDeliver(envelope) {
   // otherwise `from` is just a self-claimed string anyone can put there
   if (!(await verifySender(sender, opened.verify))) return;
   if (content.id && state.seen.has(content.id)) return;
-  if (content.id) state.seen.add(content.id);
+  markSeen(content.id);
   if (sender !== me && state.blocked.has(sender)) return; // blocked sender: drop
   const isG = !!(content.g && content.g.id);
   // a 1:1 message from someone else must actually be addressed to us
@@ -537,7 +549,7 @@ async function fanOutConv(convKey, content) {
     for (const card of (state.contacts.get(h) || [])) if (sendToCard(card, full)) ok = true;
   }
   for (const card of state.myBundle) if (toB64(card.mailbox) !== mine) sendToCard(card, full);
-  state.seen.add(full.id); // ignore our own echo when it loops back
+  markSeen(full.id); // ignore our own echo when it loops back
   return { ok, id: full.id, ts: full.ts };
 }
 async function deliverContent(convKey, body, extra = {}) {
@@ -1044,7 +1056,7 @@ async function fetchIceServers() {
 function sendCallSignal(peer, obj) {
   const content = { v: 1, t: "call", from: state.user, to: peer, id: randHex(8), ts: Date.now(), ...obj };
   for (const card of (state.contacts.get(peer) || [])) sendToCard(card, content);
-  state.seen.add(content.id);
+  markSeen(content.id);
 }
 async function newPeerConnection(peer, callId) {
   const pc = new RTCPeerConnection({ iceServers: await fetchIceServers() });

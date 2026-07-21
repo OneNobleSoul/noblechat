@@ -47,7 +47,9 @@ export async function streamToFile(req, filePath, maxBytes) {
   const limit = new Transform({
     transform(chunk, _enc, cb) {
       size += chunk.length;
-      if (size > maxBytes) cb(new Error("body too large"));
+      // tag the limit error so the caller can tell "too big" (413) apart from a
+      // disk error or an aborted upload (which are not the client's fault)
+      if (size > maxBytes) cb(Object.assign(new Error("body too large"), { code: "E_TOO_LARGE" }));
       else cb(null, chunk);
     },
   });

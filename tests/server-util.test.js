@@ -179,6 +179,8 @@ test("streamToFile rejects past the limit and removes the partial file", async (
   const dest = tmpFile();
   const pending = streamToFile(body, dest, 4);
   body.write(Buffer.from("way more than four bytes"));
-  await assert.rejects(pending, /body too large/);
+  // the limit error is tagged so the upload route can answer 413 for "too big"
+  // but not for a disk error or aborted stream
+  await assert.rejects(pending, (e) => e.code === "E_TOO_LARGE" && /body too large/.test(e.message));
   assert.equal(fs.existsSync(dest), false);
 });
