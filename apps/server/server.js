@@ -18,10 +18,10 @@ import { deserializePacket } from "../../packages/net/src/serialize.js";
 import { fromB64, toB64 } from "../../packages/crypto/src/util.js";
 import { openStore } from "./store.js";
 import { createLog } from "./log.js";
-import { isTransport, probeTcp } from "./transport.js";
+import { isTransport } from "./transport.js";
 import { connectNym } from "./nym.js";
 import { turnIceServers } from "./turn.js";
-import { HANDLE_RE, B64_RE, HEX_RE, isB64, validCard, readBody, streamToFile, json, timingEqual, hashPassword, verifyPassword, clampExpireSec } from "./util.js";
+import { HANDLE_RE, HEX_RE, isB64, validCard, readBody, streamToFile, json, timingEqual, hashPassword, verifyPassword, clampExpireSec } from "./util.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.resolve(__dirname, "../web/public");
@@ -307,7 +307,11 @@ async function main() {
         const username = await sessionUser(url.searchParams.get("token"));
         if (!username) return json(res, 401, { error: "not signed in" });
         const handles = String(url.searchParams.get("handles") || "").toLowerCase().split(",").filter((h) => HANDLE_RE.test(h)).slice(0, 100);
-        const online = {};
+        // Prototype-less map: HANDLE_RE allows "__proto__"/"constructor" as
+        // handles, so a plain object would let a caller-supplied name walk the
+        // prototype chain (property injection). Object.create(null) has no
+        // prototype, so every key is an ordinary own property.
+        const online = Object.create(null);
         for (const h of handles) {
           const mbks = await store.deviceMbkeys(h);
           online[h] = mbks.some((k) => { const s = mbkeySockets.get(k); return !!(s && s.size > 0); });
