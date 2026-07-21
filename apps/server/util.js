@@ -38,12 +38,26 @@ export function json(res, code, obj) { res.writeHead(code, { "content-type": "ap
 
 export function timingEqual(a, b) { const x = Buffer.from(String(a)); const y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); }
 
-export function hashPassword(pw) { const salt = crypto.randomBytes(16); const hash = crypto.scryptSync(pw, salt, 64); return salt.toString("hex") + "$" + hash.toString("hex"); }
+// scrypt runs on libuv's thread pool via the async API. The sync variant
+// blocked the whole event loop for the duration of the KDF, which froze every
+// websocket and all message routing while someone logged in (or hammered the
+// login endpoint on purpose).
+const scrypt = (pw, salt, keylen) =>
+  new Promise((resolve, reject) => crypto.scrypt(pw, salt, keylen, (err, key) => (err ? reject(err) : resolve(key))));
 
-export function verifyPassword(pw, stored) {
+export async function hashPassword(pw) {
+  const salt = crypto.randomBytes(16);
+  const hash = await scrypt(pw, salt, 64);
+  return salt.toString("hex") + "$" + hash.toString("hex");
+}
+
+export async function verifyPassword(pw, stored) {
   const i = String(stored).indexOf("$"); if (i < 0) return false;
   const salt = Buffer.from(stored.slice(0, i), "hex"); const want = Buffer.from(stored.slice(i + 1), "hex");
-  let got; try { got = crypto.scryptSync(pw, salt, want.length); } catch { return false; }
+  // a corrupt stored value with an empty hash would make keylen 0 and match
+  // every password, so refuse it outright
+  if (salt.length !== 16 || want.length === 0) return false;
+  let got; try { got = await scrypt(pw, salt, want.length); } catch { return false; }
   return got.length === want.length && crypto.timingSafeEqual(got, want);
 }
 
