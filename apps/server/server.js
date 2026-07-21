@@ -20,6 +20,7 @@ import { openStore } from "./store.js";
 import { createLog } from "./log.js";
 import { isTransport, probeTcp } from "./transport.js";
 import { connectNym } from "./nym.js";
+import { HANDLE_RE, B64_RE, HEX_RE, isB64, validCard, readBody, readBodyBuffer, json, timingEqual, hashPassword, verifyPassword, clampExpireSec } from "./util.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.resolve(__dirname, "../web/public");
@@ -96,41 +97,6 @@ function rateLimiter({ capacity, refillPerSec }) {
     if (b.tokens < cost) return false; b.tokens -= cost; return true;
   };
 }
-const HANDLE_RE = /^[a-z0-9_]{3,24}$/;
-const B64_RE = /^[A-Za-z0-9+/=]{1,4096}$/;
-const HEX_RE = /^[a-f0-9]{8,64}$/;
-const isB64 = (s) => typeof s === "string" && B64_RE.test(s);
-function validCard(c) {
-  return c && typeof c === "object" && typeof c.handle === "string" && HANDLE_RE.test(c.handle.toLowerCase()) &&
-    isB64(c.providerId) && isB64(c.mailbox) && c.kem && isB64(c.kem.x) && isB64(c.kem.kem) &&
-    c.sign && isB64(c.sign.ed) && isB64(c.sign.dsa);
-}
-function readBody(req, maxBytes) {
-  return new Promise((resolve, reject) => {
-    let size = 0; const chunks = [];
-    req.on("data", (c) => { size += c.length; if (size > maxBytes) { req.destroy(); reject(new Error("body too large")); return; } chunks.push(c); });
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    req.on("error", reject);
-  });
-}
-function readBodyBuffer(req, maxBytes) {
-  return new Promise((resolve, reject) => {
-    let size = 0; const chunks = [];
-    req.on("data", (c) => { size += c.length; if (size > maxBytes) { req.destroy(); reject(new Error("body too large")); return; } chunks.push(c); });
-    req.on("end", () => resolve(Buffer.concat(chunks)));
-    req.on("error", reject);
-  });
-}
-function json(res, code, obj) { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); }
-function timingEqual(a, b) { const x = Buffer.from(String(a)); const y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); }
-function hashPassword(pw) { const salt = crypto.randomBytes(16); const hash = crypto.scryptSync(pw, salt, 64); return salt.toString("hex") + "$" + hash.toString("hex"); }
-function verifyPassword(pw, stored) {
-  const i = String(stored).indexOf("$"); if (i < 0) return false;
-  const salt = Buffer.from(stored.slice(0, i), "hex"); const want = Buffer.from(stored.slice(i + 1), "hex");
-  let got; try { got = crypto.scryptSync(pw, salt, want.length); } catch { return false; }
-  return got.length === want.length && crypto.timingSafeEqual(got, want);
-}
-
 async function main() {
   const store = await openStore(CFG.databaseUrl, { mailboxTtlMs: CFG.mailboxTtlMs, maxPerMailbox: CFG.maxPerMailbox });
   const mailboxStore = {
@@ -351,7 +317,7 @@ async function main() {
         const mime = String(req.headers["x-file-type"] || "application/octet-stream").slice(0, 100);
         // Optional auto-delete: the client sends how many seconds the ciphertext
         // should live. Clamp to <= 30 days; 0/absent means keep for the usual TTL.
-        const expSec = Math.min(Math.max(0, Math.floor(Number(req.headers["x-expire-sec"]) || 0)), 30 * 24 * 3600);
+        const expSec = clampExpireSec(req.headers["x-expire-sec"], 30 * 24 * 3600);
         const expiresAt = expSec > 0 ? Date.now() + expSec * 1000 : null;
         const id = crypto.randomBytes(18).toString("hex");
         try { await store.saveFile(id, mime, buf, expiresAt); } catch { return json(res, 500, { error: "store failed" }); }
