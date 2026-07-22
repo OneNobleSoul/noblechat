@@ -409,10 +409,14 @@ function groupOfKey(k) { return isGroupKey(k) ? state.groups.get(k.slice(2)) : n
 function ensureGroup(g) {
   if (!g || !g.id) return;
   const cur = state.groups.get(g.id);
-  if (!cur || (Array.isArray(g.members) && g.members.length)) {
-    state.groups.set(g.id, { id: g.id, name: String(g.name || cur?.name || "group").slice(0, 60), members: Array.isArray(g.members) ? g.members : (cur?.members || []) });
-    saveContactsLocal(); uploadContactsBlob();
-  }
+  const name = String(g.name || cur?.name || "group").slice(0, 60);
+  const members = Array.isArray(g.members) && g.members.length ? g.members : (cur?.members || []);
+  // Group messages always carry the member list, so persisting on every one
+  // meant a full blob upload per received message from every member. Only
+  // write when the name or membership actually changed.
+  if (cur && cur.name === name && JSON.stringify(cur.members || []) === JSON.stringify(members)) return;
+  state.groups.set(g.id, { id: g.id, name, members });
+  saveContactsLocal(); uploadContactsBlob();
 }
 
 // Check that a decrypted message really was signed by one of `handle`'s
