@@ -1,6 +1,6 @@
 // JSON-safe (base64) serialization for transport between browser and gateway,
 // plus a browser-side view of the network that can pick paths.
-import { toB64, fromB64 } from "../../crypto/src/util.js";
+import { toB64, fromB64, randomIndex } from "../../crypto/src/util.js";
 
 export function serializePacket(pkt) {
   return {
@@ -74,7 +74,7 @@ export function makeBrowserNet(view) {
     providers,
     pickPath(providerIdBytes) {
       const pid = toB64(providerIdBytes);
-      const path = layers.map((row) => row[Math.floor(Math.random() * row.length)]);
+      const path = layers.map((row) => row[randomIndex(row.length)]);
       const provider = providers.find((p) => toB64(p.id) === pid);
       if (!provider) throw new Error("unknown provider");
       path.push(provider);

@@ -1,6 +1,6 @@
 // The mix network topology: layered mix nodes + provider (gateway) nodes.
 import { generateNodeKey } from "../../sphinx/src/sphinx.js";
-import { randomBytes, toB64, concatBytes, utf8ToBytes } from "../../crypto/src/util.js";
+import { randomBytes, toB64, concatBytes, utf8ToBytes, randomIndex } from "../../crypto/src/util.js";
 import { hash } from "../../crypto/src/kdf.js";
 
 // A node's network hostname is its label, lower-cased (docker service name).
@@ -42,7 +42,7 @@ export function buildTestnet({ layers = 3, perLayer = 2, providers = 2, seed = n
     isProvider: (id) => providerNodes.some((p) => key(p.id) === key(id)),
 
     pickPath(providerId) {
-      const path = layerNodes.map((row) => row[Math.floor(Math.random() * row.length)]);
+      const path = layerNodes.map((row) => row[randomIndex(row.length)]);
       const provider = byId.get(key(providerId));
       if (!provider) throw new Error("unknown provider");
       path.push(provider);

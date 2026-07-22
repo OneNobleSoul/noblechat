@@ -7,10 +7,10 @@
 // is the same size and equally opaque.
 import { processPacket } from "../../sphinx/src/sphinx.js";
 import { unpackInner } from "../../protocol/src/protocol.js";
-import { toB64 } from "../../crypto/src/util.js";
+import { toB64, randomUnitFloat } from "../../crypto/src/util.js";
 
 function poissonDelay(meanMs) {
-  return -meanMs * Math.log(1 - Math.random());
+  return -meanMs * Math.log(1 - randomUnitFloat());
 }
 
 // Default mailbox store: in-memory queue per mailbox. The gateway swaps in a
