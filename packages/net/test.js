@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildTestnet } from "./src/directory.js";
 import { Mixnet } from "./src/router.js";
+import { makeReplayGuard } from "./src/replay.js";
 import { generateIdentity, buildOutgoing, openIncoming, buildCoverLoop } from "./src/client.js";
 import { sealEnvelope, openEnvelope, encodeContent } from "../protocol/src/protocol.js";
 
@@ -111,4 +112,26 @@ test("cover traffic is delivered and recognised, then dropped by the client", as
   mix.inject(firstNodeId, packet);
   const { content: msg } = await got;
   assert.equal(msg.t, "cover"); // client would drop this instead of showing it
+});
+
+test("replay guard drops a repeated packet tag and rolls epochs", () => {
+  const g = makeReplayGuard({ epochMs: 1000, maxPerEpoch: 1e9 });
+  assert.equal(g.seen("alpha-A", 0), false); // first sight
+  assert.equal(g.seen("alpha-A", 10), true); // verbatim replay -> dropped
+  assert.equal(g.seen("alpha-B", 20), false); // a different packet is fine
+  // still remembered within the same epoch
+  assert.equal(g.seen("alpha-A", 500), true);
+  // after two epoch rotations the old tag has fallen out and is accepted again
+  g.seen("x", 1000); // rotate 1 (cur->prev, A now in prev)
+  g.seen("y", 2000); // rotate 2 (A drops out of both sets)
+  assert.equal(g.seen("alpha-A", 2001), false);
+});
+
+test("replay guard caps memory by size and rejects duplicates across the cap", () => {
+  const g = makeReplayGuard({ epochMs: 1e9, maxPerEpoch: 3 });
+  assert.equal(g.seen("a", 0), false);
+  assert.equal(g.seen("b", 0), false);
+  assert.equal(g.seen("c", 0), false); // fills the epoch -> next call rotates
+  assert.equal(g.seen("a", 0), true); // "a" still in prev after rotation
+  assert.equal(g.seen("d", 0), false);
 });

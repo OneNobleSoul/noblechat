@@ -8,6 +8,7 @@ import crypto from "node:crypto";
 import { buildTestnet } from "../../packages/net/src/directory.js";
 import { processPacket } from "../../packages/sphinx/src/sphinx.js";
 import { deserializePacket, serializePacket } from "../../packages/net/src/serialize.js";
+import { makeReplayGuard } from "../../packages/net/src/replay.js";
 import { toB64, randomUnitFloat } from "../../packages/crypto/src/util.js";
 
 const CFG = {
@@ -35,7 +36,11 @@ async function post(url, body) {
   catch { /* drop on failure - a dropped packet is indistinguishable from cover */ }
 }
 
+const replay = makeReplayGuard();
 function handlePacket(pktObj) {
+  // Drop a verbatim replay before doing any work: the alpha is unique per
+  // packet-at-this-hop, so re-injecting the same packet is caught here.
+  if (!pktObj || typeof pktObj.a !== "string" || replay.seen(pktObj.a)) return;
   let pkt; try { pkt = deserializePacket(pktObj); } catch { return; }
   let result; try { result = processPacket(self.key.secret, pkt); } catch { return; } // bad MAC / tampered → drop
   post(CFG.gateway + "/internal/hop", { label: CFG.label }); // best-effort viz

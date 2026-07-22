@@ -6,15 +6,15 @@
 // (bitwise unlinkability). Built on Ristretto255 (prime-order group) so the
 // blinding arithmetic is exact.
 //
-// Structure follows Danezis-Goldberg Sphinx (header + filler + payload onion),
-// with one deliberate simplification: the payload is a per-hop XOR stream, not a
-// LIONESS wide-block cipher. So the HEADER is integrity-protected (a per-hop MAC
-// rejects a tampered header) but the PAYLOAD is malleable - a malicious hop can
-// tag the payload and correlate a packet's input to its delivery. That is NOT
-// full tagging resistance; it is acceptable only for the current single-operator
-// deployment (the operator already holds the metadata) and the Nym-backed path,
-// which does not use this packet format at all. A multi-operator network would
-// need a wide-block payload cipher and a replay cache. See onionEncrypt below.
+// Structure follows Danezis-Goldberg Sphinx (header + filler + payload onion).
+// The header is integrity-protected by a per-hop MAC, and the payload is wrapped
+// in a LIONESS wide-block cipher per hop (see onionEncrypt): any change to the
+// payload avalanches across the whole 8 KB block, so a malicious hop cannot flip
+// a few bits to tag a packet and recognise it at the exit - a tampered payload
+// just decrypts to noise and is dropped by the end-to-end AEAD. Combined with
+// the per-node replay guard (packages/net/src/replay.js), this gives tagging and
+// replay resistance suitable for a multi-operator network, not only the current
+// single-operator / Nym-backed deployment.
 import { RistrettoPoint, ed25519 } from "@noble/curves/ed25519";
 import { chacha20 } from "@noble/ciphers/chacha";
 import { hmac } from "@noble/hashes/hmac";
@@ -77,6 +77,40 @@ function eqBytes(a, b) {
   let d = 0;
   for (let i = 0; i < a.length; i++) d |= a[i] ^ b[i];
   return d === 0;
+}
+
+// ---- LIONESS wide-block cipher (Anderson-Biham) ---------------------------
+// A length-preserving pseudo-random permutation over the whole payload: split
+// into L (one chacha key's worth) and R (the rest), then a 4-round unbalanced
+// Feistel using a stream cipher (chacha20) and a keyed hash (HMAC-SHA512). Any
+// single-bit change to ciphertext randomises the entire decrypted block, which
+// is exactly what stops payload tagging. Encryption and decryption below are
+// exact inverses of each other.
+const LBLK = 32; // left half = one chacha20 key
+function lionessKeys(s) {
+  return [subkey("li1", s), subkey("li2", s), subkey("li3", s), subkey("li4", s)];
+}
+function streamR(seed32, len) { return chacha20(seed32, new Uint8Array(12), new Uint8Array(len)); }
+function hashL(key, data) { return hmac(sha512, key, data).subarray(0, LBLK); }
+function lionessEncrypt(s, block) {
+  const [k1, k2, k3, k4] = lionessKeys(s);
+  let L = block.slice(0, LBLK);
+  let R = block.slice(LBLK);
+  R = xorBytes(R, streamR(xorBytes(L, k1), R.length));
+  L = xorBytes(L, hashL(k2, R));
+  R = xorBytes(R, streamR(xorBytes(L, k3), R.length));
+  L = xorBytes(L, hashL(k4, R));
+  return concatBytes(L, R);
+}
+function lionessDecrypt(s, block) {
+  const [k1, k2, k3, k4] = lionessKeys(s);
+  let L = block.slice(0, LBLK);
+  let R = block.slice(LBLK);
+  L = xorBytes(L, hashL(k4, R));
+  R = xorBytes(R, streamR(xorBytes(L, k3), R.length));
+  L = xorBytes(L, hashL(k2, R));
+  R = xorBytes(R, streamR(xorBytes(L, k1), R.length));
+  return concatBytes(L, R);
 }
 
 // ---- node keys ------------------------------------------------------------
@@ -145,11 +179,10 @@ function createHeader(path, secrets, alphas) {
 }
 
 // ---- payload onion (length-preserving) -----------------------------------
-// NOTE: this is a plain per-hop XOR stream, which is malleable and carries no
-// per-hop integrity. A malicious hop can flip payload bits (tagging) to mark a
-// packet and recognise it at the exit. A production multi-operator network
-// would replace this with a wide-block cipher (LIONESS) so any payload change
-// randomises the whole block. Kept simple deliberately for the current model.
+// One LIONESS wide-block layer per hop, wrapped outermost-first so hop 0 peels
+// its layer first and the exit peels last. A wide-block PRP (not a malleable XOR
+// stream) means a hop that alters the payload destroys the whole block instead
+// of leaving a recognisable tag, defeating payload-tagging correlation.
 function onionEncrypt(secrets, inner) {
   // refuse oversized payloads loudly - silently truncating would corrupt the
   // envelope and the message would vanish without a trace at the recipient
@@ -157,7 +190,7 @@ function onionEncrypt(secrets, inner) {
   let p = inner;
   if (p.length < PAYLOAD_LEN) p = concatBytes(p, new Uint8Array(PAYLOAD_LEN - p.length));
   for (let i = secrets.length - 1; i >= 0; i--) {
-    p = xorBytes(p, prg(subkey("pi", secrets[i]), PAYLOAD_LEN));
+    p = lionessEncrypt(secrets[i], p);
   }
   return p;
 }
@@ -185,10 +218,9 @@ export function processPacket(nodeSecret, packet) {
   const alpha = RistrettoPoint.fromHex(header.alpha);
   const s = alpha.multiply(nodeSecret).toRawBytes();
 
-  // integrity: this per-hop MAC covers the HEADER (beta/gamma) only, so a
-  // tampered header is rejected here. It does NOT cover the payload - the
-  // payload onion is a malleable XOR stream (see onionEncrypt), so this check
-  // does not stop payload tagging attacks.
+  // integrity: this per-hop MAC covers the HEADER (beta/gamma). The payload is
+  // protected separately by the LIONESS wide-block cipher below - a tampered
+  // payload avalanches to noise and is caught by the end-to-end AEAD.
   if (!eqBytes(mac(subkey("mu", s), header.beta), header.gamma)) {
     throw new Error("sphinx: MAC verification failed");
   }
@@ -200,8 +232,8 @@ export function processPacket(nodeSecret, packet) {
   const nextGamma = B.subarray(K, 2 * K);
   const nextBeta = B.subarray(2 * K, 2 * K + BETA_LEN);
 
-  // peel the payload onion layer
-  const nextPayload = xorBytes(payload, prg(subkey("pi", s), PAYLOAD_LEN));
+  // peel one LIONESS wide-block layer off the payload
+  const nextPayload = lionessDecrypt(s, payload);
 
   if (eqBytes(nextId, FINAL_MARKER)) {
     return { final: true, payload: nextPayload };
