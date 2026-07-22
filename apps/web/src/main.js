@@ -334,7 +334,7 @@ async function loadConvos() {
 async function uploadContactsBlob() {
   if (!state.blobKey || !state.token) return;
   try {
-    const payload = { v: 3, contacts: [...state.contacts.keys()], muted: [...state.muted], blocked: [...state.blocked], groups: [...state.groups.values()] };
+    const payload = { v: 3, contacts: [...state.contacts.keys()], muted: [...state.muted], blocked: [...state.blocked], groups: [...state.groups.values()], pins: pinsToObject() };
     const blob = await encryptBlob(state.blobKey, payload);
     await fetch("/api/account/blob", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: state.token, blob }) });
   } catch { /* */ }
@@ -353,6 +353,17 @@ async function loadContactsFromBlob() {
       for (const h of (data.muted || [])) state.muted.add(h);
       for (const h of (data.blocked || [])) state.blocked.add(h);
       for (const g of (data.groups || [])) if (g && g.id && !state.groups.has(g.id)) state.groups.set(g.id, g);
+      // Adopt synced key pins before fetching any cards, so a fresh device
+      // inherits prior trust decisions instead of silently re-TOFUing whatever
+      // the server serves. On conflict take the more cautious state (unverified
+      // wins) so a synced "verified" can't paper over a local key change.
+      for (const [h, p] of Object.entries(data.pins || {})) {
+        if (!p || !p.fp) continue;
+        const local = state.pins.get(h);
+        if (!local) state.pins.set(h, { fp: String(p.fp), ok: p.ok !== false });
+        else if (local.fp !== p.fp || local.ok === false || p.ok === false) state.pins.set(h, { fp: local.fp, ok: false });
+      }
+      savePins();
       savePrefs();
     }
     for (const h of handles) if (!state.contacts.has(h) && !state.blocked.has(h)) await fetchBundle(h, { silent: true, noSave: true });
@@ -363,23 +374,93 @@ async function loadContactsFromBlob() {
   } catch { /* */ }
 }
 
-// ---- TOFU key pinning ----------------------------------------------------
+// ---- TOFU key pinning with enforcement -----------------------------------
 // The server hands us a handle's device cards, so a malicious/compromised
-// server could swap them to impersonate someone. We pin the fingerprint of a
-// handle's signing keys on first sight; if it ever changes we surface it to the
-// user (the "safety number changed" signal) instead of trusting silently. We
-// still adopt the new keys so a genuine reinstall/new device keeps working -
-// the point is that the change is no longer invisible.
-function loadPins() { try { state.pins = new Map(Object.entries(JSON.parse(ls.get(K.pins) || "{}"))); } catch { state.pins = new Map(); } }
-function savePins() { const o = {}; for (const [h, fp] of state.pins) o[h] = fp; ls.set(K.pins, JSON.stringify(o)); }
+// server could swap them to impersonate someone. We fingerprint a handle's
+// signing keys on first sight (TOFU) and pin it. If that fingerprint later
+// changes we do NOT trust it silently: the contact is marked UNVERIFIED, a
+// persistent banner appears, SENDING to them is blocked, and any message that
+// verifies only against the new keys is flagged in the transcript - until the
+// user confirms the change, ideally after comparing the safety number out of
+// band. Pins ride in the encrypted contacts blob too, so a fresh device
+// inherits them instead of silently re-trusting whatever the server serves.
+// A pin is { fp, ok }: ok === false means "keys changed, awaiting the user".
+function loadPins() {
+  try {
+    const o = JSON.parse(ls.get(K.pins) || "{}");
+    // Tolerate the older format where a pin was just the fingerprint string.
+    state.pins = new Map(Object.entries(o).map(([h, v]) => [h, typeof v === "string" ? { fp: v, ok: true } : { fp: String(v.fp || ""), ok: v.ok !== false }]));
+  } catch { state.pins = new Map(); }
+}
+function pinsToObject() { const o = {}; for (const [h, p] of state.pins) o[h] = { fp: p.fp, ok: p.ok !== false }; return o; }
+function savePins() { ls.set(K.pins, JSON.stringify(pinsToObject())); }
 function cardsFingerprint(cards) { return (cards && cards.length) ? keysFingerprint(cards.map((c) => c.sign)) : ""; }
+function isUnverified(handle) { const p = state.pins.get(handle); return !!(p && p.ok === false); }
+// Recipients of a conversation whose keys changed and are not yet re-confirmed.
+function unverifiedPeers(convKey) {
+  const g = groupOfKey(convKey);
+  const handles = g ? (g.members || []).filter((h) => h !== state.user) : [convKey];
+  return handles.filter((h) => h && h !== state.user && isUnverified(h));
+}
 function checkPin(handle, cards) {
   if (!handle || handle === state.user) return; // our own keys need no pin
   const fp = cardsFingerprint(cards);
   if (!fp) return;
-  const known = state.pins.get(handle);
-  if (known && known !== fp) toast(`⚠ ${handle}'s security keys changed - verify it is really them`);
-  if (known !== fp) { state.pins.set(handle, fp); savePins(); }
+  const cur = state.pins.get(handle);
+  if (!cur) { state.pins.set(handle, { fp, ok: true }); savePins(); return; } // TOFU: trust first sight
+  if (cur.fp === fp) return; // unchanged, keep trust state
+  const wasTrusted = cur.ok !== false;
+  state.pins.set(handle, { fp, ok: false }); // keys changed -> require confirmation
+  savePins();
+  if (wasTrusted) {
+    toast(`⚠ ${handle}'s security keys changed - verify before sending`);
+    renderContacts();
+    if (state.active === handle || (groupOfKey(state.active)?.members || []).includes(handle)) { renderKeyBanner(); renderMessages(); }
+  }
+}
+// The user confirms a key change, ideally after comparing the safety number.
+function markVerified(handle) {
+  const p = state.pins.get(handle);
+  if (!p) return;
+  p.ok = true; state.pins.set(handle, p); savePins(); uploadContactsBlob();
+  toast(`${handle} verified`);
+  renderContacts(); renderKeyBanner(); if (state.active === handle) renderMessages();
+}
+// A combined safety number over BOTH sides' signing keys. Sorted, so the two
+// participants compute the same value and can read it out to each other over a
+// channel they already trust; if it matches, no one swapped the keys in transit.
+function safetyNumber(handle) {
+  const mine = [state.identity.card, ...state.myBundle].map((c) => c.sign);
+  const theirs = (state.contacts.get(handle) || []).map((c) => c.sign);
+  if (!theirs.length) return "";
+  const fp = keysFingerprint([...mine, ...theirs]).toUpperCase();
+  return (fp.match(/.{1,5}/g) || []).join(" ");
+}
+// Persistent in-chat warning while the active conversation has changed keys.
+function renderKeyBanner() {
+  const el = $("#key-banner"); if (!el) return;
+  const peers = state.active ? unverifiedPeers(state.active) : [];
+  if (!peers.length) { el.hidden = true; el.innerHTML = ""; return; }
+  const g = groupOfKey(state.active);
+  const label = g ? `${peers.length} member${peers.length > 1 ? "s" : ""} changed security keys` : `${esc(peers[0])}'s security keys changed`;
+  el.innerHTML = `<span class="kb-ic">⚠</span><span class="kb-text">${label}. Messages are held until you verify it is really them.</span><button id="kb-verify" class="btn tiny" type="button">Verify</button>`;
+  el.hidden = false;
+  const b = $("#kb-verify"); if (b) b.onclick = () => openSafetyNumber(peers[0]);
+}
+function openSafetyNumber(handle) {
+  const num = safetyNumber(handle);
+  const el = ensureEl("safety-modal", "modal");
+  el.innerHTML = `<div class="sm-card">
+    <div class="sm-title">Verify ${esc(handle)}</div>
+    <div class="sm-sub">Read this safety number out to ${esc(handle)} over a channel you already trust (in person, or a voice you recognise). If it matches on both sides, no one is intercepting your keys. Only mark verified once it matches.</div>
+    <div class="sm-number">${esc(num) || "no keys to compare yet"}</div>
+    <div class="sm-actions">
+      <button id="sm-cancel" class="btn ghost" type="button">Cancel</button>
+      <button id="sm-verify" class="btn" type="button"${num ? "" : " disabled"}>Mark verified</button>
+    </div></div>`;
+  el.hidden = false;
+  $("#sm-cancel").onclick = () => { el.hidden = true; };
+  const v = $("#sm-verify"); if (v && num) v.onclick = () => { el.hidden = true; markVerified(handle); };
 }
 
 async function fetchBundle(handle, { silent = true, noSave = false } = {}) {
@@ -514,7 +595,10 @@ async function onDeliver(envelope) {
 
   if (!isG) ensureContact(sender === me ? content.to : sender);
   const dir = sender === me ? "out" : "in";
-  pushMessage(convKey, { dir, sender, body: content.body, ts: content.ts || Date.now(), id: content.id, file: normalizeFile(content.file), replyTo: content.replyTo });
+  // Flag messages that only verified against a sender whose keys changed and
+  // are not yet re-confirmed, so a server-swapped identity is visible inline.
+  const unverified = sender !== me && isUnverified(sender);
+  pushMessage(convKey, { dir, sender, body: content.body, ts: content.ts || Date.now(), id: content.id, file: normalizeFile(content.file), replyTo: content.replyTo, unverified });
   if (sender !== me) {
     state.stats.recv++; updateStats(); emitPacket("recv");
     const muted = state.muted.has(convKey);
@@ -625,12 +709,19 @@ async function fanOutConv(convKey, content) {
   await loadMyBundle();
   const g = groupOfKey(convKey);
   const handles = g ? (g.members || []).filter((h) => h !== state.user) : [convKey];
+  // Refresh every recipient's cards FIRST, so a key the server just swapped is
+  // detected (checkPin flips the pin to unverified) BEFORE we decide to send.
+  // Then refuse to emit anything to a recipient whose keys changed and are not
+  // yet re-verified. This is the enforcement backstop for every caller
+  // (messages, files, reactions, unsend), and closes the window where a first
+  // message could race ahead of the card refresh onto a swapped key.
+  for (const h of handles) await fetchBundle(h, { silent: true, noSave: true });
+  if (unverifiedPeers(convKey).length) return { ok: false, id: null, ts: Date.now(), blocked: true };
   const tag = g ? { g: { id: g.id, name: g.name, members: g.members } } : { to: convKey };
   const full = { v: 1, from: state.user, id: randHex(8), ts: Date.now(), ...tag, ...content };
   let ok = false;
   const mine = toB64(state.identity.card.mailbox);
   for (const h of handles) {
-    await fetchBundle(h, { silent: true, noSave: true });
     for (const card of (state.contacts.get(h) || [])) if (sendToCard(card, full)) ok = true;
   }
   for (const card of state.myBundle) if (toB64(card.mailbox) !== mine) sendToCard(card, full);
@@ -639,6 +730,12 @@ async function fanOutConv(convKey, content) {
 }
 async function deliverContent(convKey, body, extra = {}) {
   const r = await fanOutConv(convKey, { t: "msg", body, ...extra });
+  if (r.blocked) {
+    renderKeyBanner();
+    const peers = unverifiedPeers(convKey);
+    toast(peers.length > 1 ? "verify the changed keys before sending" : `verify ${peers[0] || "the contact"}'s new keys before sending`);
+    return false;
+  }
   pushMessage(convKey, { dir: "out", sender: state.user, body, ts: r.ts, id: r.id, file: extra.file, replyTo: extra.replyTo });
   state.stats.sent++; updateStats(); emitPacket("real");
   if (!r.ok) toast("sent, but no devices reachable yet");
@@ -812,7 +909,7 @@ function setActive(handle) {
   const g = groupOfKey(handle);
   $("#chat-with").textContent = g ? g.name : handle;
   clearUnread(handle);
-  renderContacts(); renderMessages(); updateChatHeadPresence(); setMobileView("chat");
+  renderContacts(); renderMessages(); renderKeyBanner(); updateChatHeadPresence(); setMobileView("chat");
   const cv = $("#call-voice"), cvd = $("#call-video"); if (cv) cv.hidden = !!g; if (cvd) cvd.hidden = !!g;
   if (!g) pollPresence();
   const mi = $("#msg-input"); if (mi) mi.focus();
@@ -850,7 +947,7 @@ function renderContacts() {
     const dot = `<span class="dot ${on ? "on" : "off"}" title="${on ? "online" : "offline"}"></span>`;
     html += `<div class="contact ${h === state.active ? "active" : ""} ${unread ? "has-unread" : ""}" data-h="${esc(h)}">
       <div class="avatar">${esc(h[0] || "?").toUpperCase()}${dot}</div>
-      <div class="c-main"><div class="h">${esc(h)} ${muteIcon}</div><div class="s">${on ? "online" : "offline"}</div></div>
+      <div class="c-main"><div class="h">${esc(h)} ${muteIcon}${isUnverified(h) ? `<span class="mini-icon warn" title="security keys changed - verify">⚠</span>` : ""}</div><div class="s">${on ? "online" : "offline"}</div></div>
       ${badge}
       <button class="row-menu" data-menu="${esc(h)}" title="Options" aria-label="Options">⋮</button>
     </div>`;
@@ -997,7 +1094,8 @@ function renderMessages() {
         inner += `<div class="att att-media att-${esc(kind)}" data-mi="${i}"${f.expireAt ? ` data-exp="${Number(f.expireAt) || ""}"` : ""}><div class="att-ph">${ic} ${esc(f.name)} · tap to load ${exp}</div></div>` + (m.body ? `<div class="att-cap">${esc(m.body)}</div>` : "");
       } else inner += `<div class="att att-file" data-mi="${i}"><span class="att-ic">📄</span><span class="att-meta"><b>${esc(f.name)}</b><span>${fmtSize(f.size)} · tap to download</span></span></div>` + (m.body ? `<div class="att-cap">${esc(m.body)}</div>` : "");
     }
-    return `<div class="msg ${m.dir}" data-mi="${i}">${inner}<span class="t">${time}</span>${reactionsHtml(m)}</div>`;
+    const unv = m.unverified ? `<span class="msg-unverified" title="This message verified only against changed, unconfirmed keys">⚠ unverified sender</span>` : "";
+    return `<div class="msg ${m.dir}${m.unverified ? " unverified" : ""}" data-mi="${i}">${inner}${unv}<span class="t">${time}</span>${reactionsHtml(m)}</div>`;
   }).join("");
   el.querySelectorAll(".att").forEach((a) => a.addEventListener("click", (e) => { e.stopPropagation(); if (a.dataset.loaded) { if (a.dataset.kind === "image") openLightbox(a); return; } openAttachment(msgs[Number(a.dataset.mi)], a); }));
   el.querySelectorAll(".rc").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); toggleReaction(state.active, msgs[Number(b.closest(".msg").dataset.mi)], b.dataset.emoji); }));
