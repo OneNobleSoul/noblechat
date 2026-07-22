@@ -1,5 +1,6 @@
 // Small byte helpers shared across NobleChat crypto.
 import { randomBytes } from "@noble/hashes/utils";
+import { sha256 } from "@noble/hashes/sha2";
 
 export { randomBytes };
 
@@ -77,4 +78,13 @@ export function fromB64(b64) {
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
+}
+
+// Order-independent fingerprint (hex SHA-256) of a set of signing public-key
+// pairs (each { ed, dsa } as bytes). Used for TOFU key pinning: a stable id for
+// "whose signing keys are these", so a later silent substitution by a malicious
+// server can be detected and surfaced to the user.
+export function keysFingerprint(signKeys) {
+  const parts = (signKeys || []).map((k) => toB64(k.ed) + "." + toB64(k.dsa)).sort();
+  return toHex(sha256(utf8ToBytes(parts.join("|"))));
 }

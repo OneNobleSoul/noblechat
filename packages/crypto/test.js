@@ -4,7 +4,7 @@ import {
   seal, open, randomBytes, utf8ToBytes, bytesToUtf8, timingSafeEqual,
   generateKemKeypair, kemPublicBundle, encapsulate, decapsulate,
   generateSignKeypair, signPublicBundle, sign, verify,
-  randomUnitFloat, randomIndex,
+  randomUnitFloat, randomIndex, keysFingerprint,
 } from "./src/index.js";
 
 test("AEAD round-trips and rejects tampering", () => {
@@ -74,4 +74,15 @@ test("randomIndex is uniform-ish over [0,n) and never out of bounds", () => {
   }
   // every bucket hit, none wildly skewed (expected ~4000 each)
   for (const c of counts) assert.ok(c > 3000 && c < 5000, `skewed bucket: ${c}`);
+});
+
+test("keysFingerprint is order-independent and change-sensitive", () => {
+  const k = (a, b) => ({ ed: new Uint8Array(a), dsa: new Uint8Array(b) });
+  const set1 = [k([1, 2, 3], [4, 5]), k([9], [8])];
+  const set2 = [set1[1], set1[0]]; // same keys, different order
+  const set3 = [k([1, 2, 3], [4, 5]), k([9], [7])]; // one dsa byte changed
+  assert.equal(keysFingerprint(set1), keysFingerprint(set2));
+  assert.notEqual(keysFingerprint(set1), keysFingerprint(set3));
+  assert.match(keysFingerprint(set1), /^[0-9a-f]{64}$/);
+  assert.equal(keysFingerprint([]), keysFingerprint([]));
 });

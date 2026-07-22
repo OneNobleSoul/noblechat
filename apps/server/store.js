@@ -5,9 +5,16 @@
 // an encrypted per-account contacts blob (opaque to us), admin settings, bans.
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import pg from "pg";
 
 const { Pool } = pg;
+
+// Sessions are stored hashed at rest: a database leak then exposes only
+// SHA-256 digests, not live bearer tokens someone could replay. The token is
+// high-entropy random (32 bytes), so a plain hash is enough - no salt/KDF
+// needed, and lookups stay a single indexed equality check.
+const hashToken = (t) => crypto.createHash("sha256").update(String(t)).digest("hex");
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS accounts (
@@ -149,16 +156,17 @@ export async function openStore(databaseUrl, { mailboxTtlMs = 7 * 24 * 3600 * 10
 
     // ---- sessions ----
     async createSession(token, username, ttlMs) {
-      await pool.query("INSERT INTO sessions(token,username,created_at,expires_at) VALUES($1,$2,$3,$4)", [token, username, now(), now() + ttlMs]);
+      await pool.query("INSERT INTO sessions(token,username,created_at,expires_at) VALUES($1,$2,$3,$4)", [hashToken(token), username, now(), now() + ttlMs]);
     },
     async getSession(token) {
-      const r = await pool.query("SELECT username,expires_at FROM sessions WHERE token=$1", [token]);
+      const th = hashToken(token);
+      const r = await pool.query("SELECT username,expires_at FROM sessions WHERE token=$1", [th]);
       const s = r.rows[0];
       if (!s) return null;
-      if (Number(s.expires_at) < now()) { await pool.query("DELETE FROM sessions WHERE token=$1", [token]); return null; }
+      if (Number(s.expires_at) < now()) { await pool.query("DELETE FROM sessions WHERE token=$1", [th]); return null; }
       return { username: s.username };
     },
-    async deleteSession(token) { await pool.query("DELETE FROM sessions WHERE token=$1", [token]); },
+    async deleteSession(token) { await pool.query("DELETE FROM sessions WHERE token=$1", [hashToken(token)]); },
     async deleteSessionsForUser(username) { await pool.query("DELETE FROM sessions WHERE username=$1", [username]); },
 
     // ---- encrypted contacts blob ----
