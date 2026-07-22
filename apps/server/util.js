@@ -66,6 +66,19 @@ export function json(res, code, obj) { res.writeHead(code, { "content-type": "ap
 
 export function timingEqual(a, b) { const x = Buffer.from(String(a)); const y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); }
 
+// Decide whether a WebSocket handshake's Origin may open the gateway. Browsers
+// always send Origin, so a cross-origin page can't silently open a socket on a
+// visitor's behalf. Native clients send no Origin and are allowed (the session
+// check on subscribe is the real gate). Same-origin (page host == gateway host)
+// always passes; extra hosts come from the allowlist.
+export function originAllowed(originHeader, hostHeader, allowedOrigins = []) {
+  if (!originHeader) return true; // non-browser client
+  let host;
+  try { host = new URL(originHeader).host; } catch { return false; }
+  if (hostHeader && host === hostHeader) return true;
+  return allowedOrigins.includes(originHeader);
+}
+
 // scrypt runs on libuv's thread pool via the async API. The sync variant
 // blocked the whole event loop for the duration of the KDF, which froze every
 // websocket and all message routing while someone logged in (or hammered the

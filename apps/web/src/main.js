@@ -386,7 +386,7 @@ function connectWS() {
   const ws = new WebSocket(`${proto}://${location.host}/gateway`);
   state.ws = ws;
   ws.addEventListener("open", () => {
-    ws.send(JSON.stringify({ t: "subscribe", provider: toB64(state.identity.providerId), mailbox: toB64(state.identity.mailbox) }));
+    ws.send(JSON.stringify({ t: "subscribe", token: state.token, provider: toB64(state.identity.providerId), mailbox: toB64(state.identity.mailbox) }));
     if (state.coverOn) scheduleCover();
   });
   ws.addEventListener("message", (ev) => {
@@ -398,6 +398,9 @@ function connectWS() {
   ws.addEventListener("close", (ev) => {
     if (ev.code === 4003) { toast("this account has been suspended"); clearSession(); location.reload(); return; }
     if (ev.code === 4004) { toast("this account was removed"); clearSession(); location.reload(); return; }
+    // 4001 = the gateway rejected the subscription (expired/invalid session).
+    // Reconnecting would just loop, so send the user back to sign-in instead.
+    if (ev.code === 4001) { toast("session expired, please sign in again"); clearSession(); location.reload(); return; }
     setTimeout(connectWS, 1500);
   });
 }

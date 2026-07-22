@@ -21,7 +21,7 @@ import { createLog } from "./log.js";
 import { isTransport } from "./transport.js";
 import { connectNym } from "./nym.js";
 import { turnIceServers } from "./turn.js";
-import { HANDLE_RE, HEX_RE, isB64, validCard, readBody, streamToFile, json, timingEqual, hashPassword, verifyPassword, clampExpireSec } from "./util.js";
+import { HANDLE_RE, HEX_RE, isB64, validCard, readBody, streamToFile, json, timingEqual, originAllowed, hashPassword, verifyPassword, clampExpireSec } from "./util.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.resolve(__dirname, "../web/public");
@@ -58,6 +58,11 @@ const CFG = {
   turnSecret: process.env.TURN_SHARED_SECRET || "",
   turnUris: (process.env.TURN_URIS || "").split(",").map((s) => s.trim()).filter(Boolean),
   turnTtlSec: Number(process.env.TURN_TTL_SEC || 3600),
+  // Extra origins allowed to open the gateway WebSocket, on top of same-origin
+  // (page host == connection host, which always works with no config). Only
+  // needed when the browser page is served from a different host than the
+  // gateway. Comma-separated, e.g. "https://chat.example.com".
+  allowedOrigins: (process.env.ALLOWED_ORIGINS || "").split(",").map((s) => s.trim()).filter(Boolean),
 };
 
 function computeVersion() {
@@ -126,7 +131,7 @@ async function main() {
   async function forwardToNode(url, packetObj) {
     try { await fetch(url, { method: "POST", headers: { "content-type": "application/json", "x-internal": CFG.internalToken }, body: JSON.stringify({ packet: packetObj }) }); } catch { /* drop */ }
   }
-  const internalOk = (req) => CFG.internalToken && req.headers["x-internal"] === CFG.internalToken;
+  const internalOk = (req) => !!CFG.internalToken && timingEqual(req.headers["x-internal"] || "", CFG.internalToken);
 
   const live = { maintenance: (await store.getSetting("maintenance", "off")) === "on", maintenanceMsg: (await store.getSetting("maintenance_msg", "")) || "", announcement: (await store.getSetting("announcement", "")) || "", transport: (await store.getSetting("transport", "internal")) || "internal" };
   if (!isTransport(live.transport)) live.transport = "internal";
@@ -516,6 +521,9 @@ async function main() {
   const wss = new WebSocketServer({ server, path: "/gateway", maxPayload: CFG.maxWsMsgBytes });
   const connPerIp = new Map();
   wss.on("connection", (ws, req) => {
+    // A browser always sends Origin on a WS handshake; reject cross-origin ones
+    // so a malicious page can't open a gateway socket in a visitor's browser.
+    if (!originAllowed(req.headers.origin, req.headers.host, CFG.allowedOrigins)) { ws.close(4008, "forbidden origin"); return; }
     const ip = clientIp(req);
     const n = (connPerIp.get(ip) || 0) + 1; connPerIp.set(ip, n);
     if (n > CFG.maxConnPerIp) { ws.close(1013, "too many connections"); return; }
@@ -538,11 +546,25 @@ async function main() {
         if (!isB64(m.provider) || !isB64(m.mailbox)) return;
         const mbkey = m.provider + ":" + m.mailbox;
         if (bannedMbkeys.has(mbkey)) { ws.close(4003, "banned"); return; }
-        if (unsub) unsub();
-        myMbkey = mbkey;
-        if (!mbkeySockets.has(mbkey)) mbkeySockets.set(mbkey, new Set());
-        mbkeySockets.get(mbkey).add(ws);
-        unsub = mix.subscribe(fromB64(m.provider), fromB64(m.mailbox), (env) => { if (ws.readyState === 1) ws.send(JSON.stringify({ t: "deliver", envelope: toB64(env) })); });
+        // Bind the subscription to the caller's session. A mailbox is
+        // discoverable (its provider is public via /api/net, its mailbox via
+        // /api/bundle?handle=...), so without this check anyone could subscribe
+        // to a victim's mailbox, drain its queued offline messages and silently
+        // absorb every future delivery. You may only listen on a mailbox that
+        // belongs to one of your own account's devices.
+        (async () => {
+          const username = await sessionUser(m.token);
+          if (!username) { try { ws.close(4001, "unauthorized"); } catch { /* */ } return; }
+          const owned = await store.deviceMbkeys(username);
+          if (!owned.includes(mbkey)) { try { ws.close(4001, "forbidden mailbox"); } catch { /* */ } return; }
+          if (ws.readyState !== 1) return; // socket closed while the session check was in flight
+          if (unsub) unsub();
+          myMbkey = mbkey;
+          if (!mbkeySockets.has(mbkey)) mbkeySockets.set(mbkey, new Set());
+          mbkeySockets.get(mbkey).add(ws);
+          unsub = mix.subscribe(fromB64(m.provider), fromB64(m.mailbox), (env) => { if (ws.readyState === 1) ws.send(JSON.stringify({ t: "deliver", envelope: toB64(env) })); });
+        })().catch(() => {});
+        return;
       }
     });
     ws.on("close", () => {
