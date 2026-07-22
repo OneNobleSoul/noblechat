@@ -82,8 +82,8 @@ console.log("alice received:", JSON.stringify(got2.content));
 
 // file upload round-trip: opaque bytes in, identical bytes out
 const payload = new Uint8Array([1, 2, 3, 251, 252, 253]);
-const up = await fetch(`${BASE}/api/upload?token=${encodeURIComponent(alice.token)}`, {
-  method: "POST", headers: { "content-type": "application/octet-stream", "x-file-type": "application/test" }, body: payload,
+const up = await fetch(`${BASE}/api/upload`, {
+  method: "POST", headers: { "content-type": "application/octet-stream", "x-file-type": "application/test", Authorization: "Bearer " + alice.token }, body: payload,
 });
 const { id: fileId } = await up.json();
 const down = new Uint8Array(await (await fetch(`${BASE}/api/file?id=${fileId}`)).arrayBuffer());

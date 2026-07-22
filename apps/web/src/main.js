@@ -1306,6 +1306,11 @@ async function getLocalMedia(video) {
 async function startCall(peer, video) {
   if (state.call) { toast("already in a call"); return; }
   if (isGroupKey(peer)) { toast("calls are 1:1 only"); return; }
+  // Same gate as sending: refresh the peer's card and refuse to place a call if
+  // their keys changed and are not yet re-verified (a call to a swapped key
+  // would set up media with an impersonator). Verify via the safety number first.
+  await fetchBundle(peer, { silent: true, noSave: true });
+  if (isUnverified(peer)) { toast(`verify ${peer}'s new keys before calling`); openSafetyNumber(peer); return; }
   const ice = await fetchIceServers();
   if (!ice.hasTurn && !confirmCallIpExposure()) return; // user declined to expose their IP
   const callId = randHex(8);
