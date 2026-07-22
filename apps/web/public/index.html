@@ -26,7 +26,7 @@
   <div class="gate-card">
     <div class="logo">◆ NobleChat</div>
     <p class="tag">This instance is in private testing.</p>
-    <label>Access password</label>
+    <label for="gate-input">Access password</label>
     <input id="gate-input" type="password" placeholder="enter test password" autocomplete="off" spellcheck="false">
     <button id="gate-go" class="btn">Unlock</button>
     <p id="gate-err" class="err" hidden>Wrong password - try again.</p>
@@ -45,9 +45,9 @@
         <button id="tab-login" class="auth-tab active">Sign in</button>
         <button id="tab-register" class="auth-tab">Create account</button>
       </div>
-      <label>Handle</label>
+      <label for="auth-user">Handle</label>
       <input id="auth-user" placeholder="e.g. kirito" autocomplete="username" spellcheck="false" maxlength="24">
-      <label>Password</label>
+      <label for="auth-pass">Password</label>
       <input id="auth-pass" type="password" placeholder="your password" autocomplete="current-password">
       <button id="auth-go" class="btn">Sign in</button>
       <p id="setup-err" class="err" hidden></p>
@@ -75,18 +75,18 @@
     <span class="me">you are <b id="me-handle">…</b></span>
     <div class="top-right">
       <span class="pill secure" title="hybrid X25519+ML-KEM content encryption, Sphinx mix routing">🔒 PQ · Mixnet</span>
-      <button id="sound-toggle" class="pill" title="Notification sound for new messages">🔔</button>
+      <button id="sound-toggle" class="pill" title="Notification sound for new messages" aria-label="Notification sound for new messages">🔔</button>
       <button id="cover-toggle" class="pill" title="Send indistinguishable dummy traffic to hide when you talk">cover: off</button>
-      <button id="devices-btn" class="pill" title="Sign out your other devices" hidden>📱</button>
+      <button id="devices-btn" class="pill" title="Sign out your other devices" aria-label="Sign out your other devices" hidden>📱</button>
       <button id="logout-btn" class="pill" title="Sign out of this device">sign out</button>
     </div>
   </header>
 
   <aside class="sidebar">
     <div class="add">
-      <input id="add-handle" placeholder="add contact by handle" autocomplete="off" spellcheck="false">
-      <button id="add-go" class="btn-sm" title="Add contact">+</button>
-      <button id="new-group" class="btn-sm" title="New group">👥</button>
+      <input id="add-handle" placeholder="add contact by handle" aria-label="Add contact by handle" autocomplete="off" spellcheck="false">
+      <button id="add-go" class="btn-sm" title="Add contact" aria-label="Add contact">+</button>
+      <button id="new-group" class="btn-sm" title="New group" aria-label="New group">👥</button>
     </div>
     <div id="contacts" class="contacts"></div>
     <div id="blocked-wrap" class="blocked-wrap" hidden>
@@ -140,7 +140,7 @@
         </div>
         <button id="attach-btn" class="icon-btn" title="Attach a file" aria-label="Attach a file" type="button">📎</button>
         <input id="file-input" type="file" hidden>
-        <input id="msg-input" placeholder="type a message…" autocomplete="off">
+        <input id="msg-input" placeholder="type a message…" aria-label="Message" autocomplete="off">
         <button id="msg-send" class="btn">Send</button>
       </div>
     </div>
@@ -151,7 +151,7 @@
 <div id="group-modal" class="modal" hidden>
   <div class="modal-card">
     <div class="modal-title">New group</div>
-    <label>Group name</label>
+    <label for="group-name">Group name</label>
     <input id="group-name" placeholder="e.g. friends" maxlength="60" autocomplete="off">
     <label>Members</label>
     <div id="group-members" class="group-members"></div>
