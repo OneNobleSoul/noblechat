@@ -47,7 +47,7 @@ async function makeClient(handle) {
       if (content.t === "msg") waiters.shift()?.({ content, verify });
     }
   });
-  ws.send(JSON.stringify({ t: "subscribe", provider: toB64(id.providerId), mailbox: toB64(id.mailbox) }));
+  ws.send(JSON.stringify({ t: "subscribe", token, provider: toB64(id.providerId), mailbox: toB64(id.mailbox) }));
   return {
     id, net, ws, token,
     async peerCard(toHandle) {

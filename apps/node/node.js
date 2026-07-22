@@ -4,6 +4,7 @@
 // network. A node never learns more than its own hop: the previous sender and
 // the next hop, nothing about the rest of the path or the content.
 import http from "node:http";
+import crypto from "node:crypto";
 import { buildTestnet } from "../../packages/net/src/directory.js";
 import { processPacket } from "../../packages/sphinx/src/sphinx.js";
 import { deserializePacket, serializePacket } from "../../packages/net/src/serialize.js";
@@ -46,10 +47,14 @@ function handlePacket(pktObj) {
   }
 }
 
+// Constant-time compare for the shared internal token, so a byte-by-byte
+// timing side channel can't leak it (same primitive the gateway uses).
+function tokenEqual(a, b) { const x = Buffer.from(String(a)); const y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); }
+
 const server = http.createServer((req, res) => {
   if (req.url === "/healthz") { res.writeHead(200).end("ok"); return; }
   if (req.url === "/mix" && req.method === "POST") {
-    if (!CFG.token || req.headers["x-internal"] !== CFG.token) { res.writeHead(401).end(); return; }
+    if (!CFG.token || !tokenEqual(req.headers["x-internal"], CFG.token)) { res.writeHead(401).end(); return; }
     let body = ""; let size = 0;
     req.on("data", (c) => { size += c.length; if (size > 256 * 1024) req.destroy(); else body += c; });
     req.on("end", () => {

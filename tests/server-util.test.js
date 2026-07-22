@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import {
   HANDLE_RE, HEX_RE, isB64, validCard,
-  readBody, readBodyBuffer, timingEqual,
+  readBody, readBodyBuffer, timingEqual, originAllowed,
   hashPassword, verifyPassword, clampExpireSec,
 } from "../apps/server/util.js";
 
@@ -183,4 +183,17 @@ test("streamToFile rejects past the limit and removes the partial file", async (
   // but not for a disk error or aborted stream
   await assert.rejects(pending, (e) => e.code === "E_TOO_LARGE" && /body too large/.test(e.message));
   assert.equal(fs.existsSync(dest), false);
+});
+
+test("gateway origin check accepts same-origin and blocks cross-origin browsers", () => {
+  // native client (no Origin header) is allowed; the session check gates it
+  assert.ok(originAllowed(undefined, "chat.example.com", []));
+  // browser page served from the same host as the gateway
+  assert.ok(originAllowed("https://chat.example.com", "chat.example.com", []));
+  // a foreign site trying to open a socket in a visitor's browser
+  assert.ok(!originAllowed("https://evil.example", "chat.example.com", []));
+  // explicit allowlist entry (page host differs from gateway host)
+  assert.ok(originAllowed("https://app.example.com", "gw.example.com", ["https://app.example.com"]));
+  // a malformed Origin is rejected rather than trusted
+  assert.ok(!originAllowed("not a url", "chat.example.com", []));
 });
