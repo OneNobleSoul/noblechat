@@ -32,6 +32,22 @@ test("3-hop route: each hop learns only the next, exit recovers payload", () => 
   assert.equal(bytesToUtf8(r2.payload.subarray(0, msg.length)), bytesToUtf8(msg));
 });
 
+test("full 5-hop route round-trips the payload through every LIONESS layer", () => {
+  const hops = [nodeWithId(), nodeWithId(), nodeWithId(), nodeWithId(), nodeWithId()];
+  const path = hops.map((h) => ({ id: h.id, public: h.key.public }));
+  const msg = utf8ToBytes("five hops deep and the wide-block cipher still peels cleanly");
+  let cur = createPacket(path, msg);
+  for (let i = 0; i < 4; i++) {
+    const r = processPacket(hops[i].key.secret, cur);
+    assert.equal(r.final, false);
+    assert.deepEqual(r.nextId, hops[i + 1].id);
+    cur = r.packet;
+  }
+  const last = processPacket(hops[4].key.secret, cur);
+  assert.equal(last.final, true);
+  assert.equal(bytesToUtf8(last.payload.subarray(0, msg.length)), bytesToUtf8(msg));
+});
+
 test("packets are constant size regardless of hop count", () => {
   const one = [nodeWithId()];
   const five = [nodeWithId(), nodeWithId(), nodeWithId(), nodeWithId(), nodeWithId()];
@@ -50,14 +66,34 @@ test("a wrong mix key cannot process the packet (MAC fails)", () => {
   assert.throws(() => processPacket(attacker.secret, pkt), /MAC/);
 });
 
-test("tampering with the payload is detected at the exit via the inner AEAD contract", () => {
-  // the mix payload itself is malleable stream crypto by design; integrity of
-  // the *content* is the end-to-end AEAD layer's job. Here we just confirm the
-  // onion length is preserved so tampering can't change routing size.
-  const hops = [nodeWithId()];
+test("payload is a wide-block PRP: a single tampered bit avalanches (tagging resistance)", () => {
+  // A malicious hop that flips payload bits to tag a packet must NOT get a
+  // recognisable mark at the exit. With the LIONESS wide-block cipher, changing
+  // one bit mid-route randomises the whole decrypted block, so the tag is
+  // destroyed (and the message dies at the end-to-end AEAD) rather than
+  // surviving as a correlatable pattern.
+  const hops = [nodeWithId(), nodeWithId(), nodeWithId()];
   const path = hops.map((h) => ({ id: h.id, public: h.key.public }));
-  const pkt = createPacket(path, utf8ToBytes("x"));
-  assert.equal(pkt.payload.length, PAYLOAD_LEN);
+  const msg = utf8ToBytes("carry me across the mixnet without a tag");
+  const pkt = createPacket(path, msg);
+
+  // clean run to get the reference exit payload
+  const c0 = processPacket(hops[0].key.secret, pkt);
+  const c1 = processPacket(hops[1].key.secret, c0.packet);
+  const clean = processPacket(hops[2].key.secret, c1.packet).payload;
+
+  // tampered run: flip one bit in the payload after hop 0 (an in-path attacker)
+  const t0 = processPacket(hops[0].key.secret, pkt);
+  t0.packet.payload[100] ^= 0x01;
+  const t1 = processPacket(hops[1].key.secret, t0.packet);
+  const tampered = processPacket(hops[2].key.secret, t1.packet).payload;
+
+  assert.equal(tampered.length, clean.length);
+  let diff = 0;
+  for (let i = 0; i < clean.length; i++) if (clean[i] !== tampered[i]) diff++;
+  // a plain XOR onion would differ in exactly 1 bit; a wide-block PRP avalanches
+  // across roughly half the block. Require a large fraction to have changed.
+  assert.ok(diff > clean.length * 0.3, `expected avalanche, only ${diff}/${clean.length} bytes changed`);
 });
 
 test("an inner payload larger than PAYLOAD_LEN is rejected, not silently truncated", () => {
