@@ -336,3 +336,20 @@ body.lb-open{overflow:hidden}
 .auth-tab.active{background:var(--panel-2);color:var(--text)}
 #logout-btn{cursor:pointer}
 #logout-btn:hover{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 40%,var(--line))}
+
+/* ---- key-change enforcement: banner, safety number, unverified marks ---- */
+.key-banner{display:flex;align-items:center;gap:10px;margin:0 14px 8px;padding:9px 12px;border-radius:10px;background:color-mix(in srgb,var(--warn) 14%,var(--panel));border:1px solid color-mix(in srgb,var(--warn) 45%,var(--line));color:var(--text);font-size:13px}
+.key-banner[hidden]{display:none!important}
+.key-banner .kb-ic{color:var(--warn);font-size:15px;line-height:1}
+.key-banner .kb-text{flex:1;line-height:1.35}
+.btn.tiny{padding:6px 12px;font-size:12px;border-radius:8px}
+.btn.ghost:hover{box-shadow:none;background:var(--panel)}
+.btn[disabled]{opacity:.5;pointer-events:none}
+.sm-card{width:min(460px,94vw);background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:24px;box-shadow:0 40px 120px -50px #000}
+.sm-title{font-size:17px;font-weight:700;margin-bottom:8px}
+.sm-sub{font-size:13px;color:var(--muted);line-height:1.5;margin-bottom:16px}
+.sm-number{font-family:var(--mono);font-size:16px;letter-spacing:.06em;line-height:1.7;text-align:center;color:var(--accent);background:#0a0e15;border:1px solid var(--line);border-radius:12px;padding:16px;word-break:break-word;margin-bottom:18px}
+.sm-actions{display:flex;justify-content:flex-end;gap:10px}
+.msg.unverified{border:1px solid color-mix(in srgb,var(--warn) 55%,var(--line))}
+.msg-unverified{display:block;margin-top:4px;font-size:11px;font-weight:600;color:var(--warn)}
+.mini-icon.warn{color:var(--warn)}
