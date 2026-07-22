@@ -8,7 +8,7 @@ import crypto from "node:crypto";
 import { buildTestnet } from "../../packages/net/src/directory.js";
 import { processPacket } from "../../packages/sphinx/src/sphinx.js";
 import { deserializePacket, serializePacket } from "../../packages/net/src/serialize.js";
-import { toB64 } from "../../packages/crypto/src/util.js";
+import { toB64, randomUnitFloat } from "../../packages/crypto/src/util.js";
 
 const CFG = {
   label: process.env.NODE_LABEL,
@@ -29,7 +29,7 @@ for (const row of dir.layers) for (const n of row) if (n.label === CFG.label) se
 for (const p of dir.providers) if (p.label === CFG.label) self = p;
 if (!self) { console.error("mix node: unknown NODE_LABEL", CFG.label); process.exit(1); }
 
-const poisson = (m) => -m * Math.log(1 - Math.random());
+const poisson = (m) => -m * Math.log(1 - randomUnitFloat());
 async function post(url, body) {
   try { await fetch(url, { method: "POST", headers: { "content-type": "application/json", "x-internal": CFG.token }, body: JSON.stringify(body) }); }
   catch { /* drop on failure - a dropped packet is indistinguishable from cover */ }

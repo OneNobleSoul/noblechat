@@ -8,7 +8,7 @@ import {
   makeBrowserNet, serializePacket, serializeCard, deserializeCard,
   serializeIdentity, deserializeIdentity,
 } from "../../../packages/net/src/serialize.js";
-import { toB64, fromB64 } from "../../../packages/crypto/src/util.js";
+import { toB64, fromB64, randomUnitFloat } from "../../../packages/crypto/src/util.js";
 
 const $ = (s) => document.querySelector(s);
 const K = { token: "noblechat:token", user: "noblechat:user", dev: "noblechat:deviceId", id: "noblechat:id", bkey: "noblechat:bkey", contacts: "noblechat:contacts", prefs: "noblechat:prefs", history: "noblechat:history" };
@@ -45,7 +45,7 @@ function markSeen(id) {
 function toast(msg) { const t = $("#toast"); t.hidden = false; t.textContent = msg; requestAnimationFrame(() => t.classList.add("show")); clearTimeout(toast._t); toast._t = setTimeout(() => { t.classList.remove("show"); setTimeout(() => (t.hidden = true), 250); }, 2600); }
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 function simpleHash(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; }
-function poisson(mean) { return -mean * Math.log(1 - Math.random()); }
+function poisson(mean) { return -mean * Math.log(1 - randomUnitFloat()); }
 
 async function sha256Hex(str) { const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str)); return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join(""); }
 
@@ -270,7 +270,7 @@ async function pollPresence() {
   const handles = [...state.contacts.keys()];
   if (!handles.length || !state.token) return;
   try {
-    const r = await fetch(`/api/presence?token=${encodeURIComponent(state.token)}&handles=${encodeURIComponent(handles.join(","))}`);
+    const r = await fetch(`/api/presence?handles=${encodeURIComponent(handles.join(","))}`, { headers: { Authorization: "Bearer " + state.token } });
     if (!r.ok) return;
     const { online } = await r.json();
     const onSet = new Set(Array.isArray(online) ? online : []); // server returns the online handles as a list
@@ -341,7 +341,7 @@ async function uploadContactsBlob() {
 async function loadContactsFromBlob() {
   if (!state.blobKey) return;
   try {
-    const r = await fetch("/api/account/blob?token=" + encodeURIComponent(state.token));
+    const r = await fetch("/api/account/blob", { headers: { Authorization: "Bearer " + state.token } });
     if (!r.ok) return;
     const { blob } = await r.json();
     if (!blob) return;
@@ -443,6 +443,25 @@ async function verifySender(handle, verify) {
   return check();
 }
 
+// A received message's `file` object is attacker-controlled: coerce every field
+// to the exact type/shape the UI expects before it is ever stored or rendered,
+// so a crafted value can't break out of an HTML attribute or class. Decryption
+// fields (id/key/mime/enc) are kept as plain strings; they only feed
+// encodeURIComponent/fromB64, never raw HTML.
+function normalizeFile(f) {
+  if (!f || typeof f !== "object") return undefined;
+  const out = {
+    name: String(f.name || "file").slice(0, 120),
+    mime: String(f.mime || "application/octet-stream").slice(0, 100),
+    size: Number(f.size) || 0,
+    id: String(f.id || ""),
+    key: String(f.key || ""),
+    enc: String(f.enc || ""),
+  };
+  if (f.expireAt != null && Number.isFinite(Number(f.expireAt))) out.expireAt = Number(f.expireAt);
+  return out;
+}
+
 async function onDeliver(envelope) {
   let opened; try { opened = openIncoming(state.identity, envelope); } catch { return; }
   const content = opened.content;
@@ -473,7 +492,7 @@ async function onDeliver(envelope) {
 
   if (!isG) ensureContact(sender === me ? content.to : sender);
   const dir = sender === me ? "out" : "in";
-  pushMessage(convKey, { dir, sender, body: content.body, ts: content.ts || Date.now(), id: content.id, file: content.file, replyTo: content.replyTo });
+  pushMessage(convKey, { dir, sender, body: content.body, ts: content.ts || Date.now(), id: content.id, file: normalizeFile(content.file), replyTo: content.replyTo });
   if (sender !== me) {
     state.stats.recv++; updateStats(); emitPacket("recv");
     const muted = state.muted.has(convKey);
@@ -697,9 +716,9 @@ async function sendFile(file, expireSec = 0) {
     const keyRaw = crypto.getRandomValues(new Uint8Array(32));
     const enc = await encryptFileChunked(keyRaw, file);
     const mime = fileMime(file);
-    const headers = { "content-type": "application/octet-stream", "x-file-type": mime };
+    const headers = { "content-type": "application/octet-stream", "x-file-type": mime, Authorization: "Bearer " + state.token };
     if (expireSec > 0) headers["x-expire-sec"] = String(expireSec);
-    const r = await fetch(`/api/upload?token=${encodeURIComponent(state.token)}`, { method: "POST", headers, body: enc });
+    const r = await fetch("/api/upload", { method: "POST", headers, body: enc });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j.id) { toast(j.error || "upload failed"); return; }
     const fileMeta = { name: file.name.slice(0, 120), mime, size: file.size, id: j.id, key: toB64(keyRaw), enc: "c1" };
@@ -933,7 +952,7 @@ function reactionsHtml(m) {
   if (!m.reactions) return "";
   const chips = Object.entries(m.reactions).filter(([, arr]) => arr.length).map(([e, arr]) => {
     const mine = arr.includes(state.user) ? " mine" : "";
-    return `<button class="rc${mine}" data-emoji="${esc(e)}">${e} ${arr.length}</button>`;
+    return `<button class="rc${mine}" data-emoji="${esc(e)}">${esc(e)} ${arr.length}</button>`;
   }).join("");
   return chips ? `<div class="reactions">${chips}</div>` : "";
 }
@@ -953,7 +972,7 @@ function renderMessages() {
       else if (kind === "image" || kind === "video" || kind === "audio") {
         const exp = f.expireAt ? `<span class="att-timer" title="auto-deletes">🕓 ${fmtRemaining(f.expireAt - Date.now())}</span>` : "";
         const ic = kind === "video" ? "🎬" : kind === "audio" ? "🎵" : "🖼";
-        inner += `<div class="att att-media att-${kind}" data-mi="${i}"${f.expireAt ? ` data-exp="${f.expireAt}"` : ""}><div class="att-ph">${ic} ${esc(f.name)} · tap to load ${exp}</div></div>` + (m.body ? `<div class="att-cap">${esc(m.body)}</div>` : "");
+        inner += `<div class="att att-media att-${esc(kind)}" data-mi="${i}"${f.expireAt ? ` data-exp="${Number(f.expireAt) || ""}"` : ""}><div class="att-ph">${ic} ${esc(f.name)} · tap to load ${exp}</div></div>` + (m.body ? `<div class="att-cap">${esc(m.body)}</div>` : "");
       } else inner += `<div class="att att-file" data-mi="${i}"><span class="att-ic">📄</span><span class="att-meta"><b>${esc(f.name)}</b><span>${fmtSize(f.size)} · tap to download</span></span></div>` + (m.body ? `<div class="att-cap">${esc(m.body)}</div>` : "");
     }
     return `<div class="msg ${m.dir}" data-mi="${i}">${inner}<span class="t">${time}</span>${reactionsHtml(m)}</div>`;
@@ -1100,24 +1119,35 @@ function pulseHop(label) { let col = -1; const m = /^mix-L(\d+)/.exec(label); if
 const STUN_SERVERS = [
   { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
 ];
-// Public STUN only helps two peers behind "easy" NATs find each other; behind
-// a strict/symmetric NAT (common on mobile carriers and some routers) it
-// never connects and a call just hangs at "connecting". A TURN relay fixes
-// that by giving both sides one straightforward hop instead. The server hands
-// out short-lived credentials (see /api/turn-credentials); if no TURN server
-// is configured there, this simply returns [] and calls stay STUN-only.
+// WebRTC media is peer-to-peer. Left to its defaults it trades direct ICE
+// candidates, which hands the user's real public IP straight to whoever they
+// call - a direct handle->IP deanonymisation channel that defeats the whole
+// point of routing everything else over the mixnet. So: when a TURN relay is
+// configured we force media through it (relay-only, IP stays hidden). When no
+// relay is available we do NOT leak silently - the caller/callee must first
+// consent to exposing their IP (see confirmCallIpExposure). Public STUN is
+// kept only for that consented direct-connection fallback.
+const isTurnServer = (s) => {
+  const arr = Array.isArray(s && s.urls) ? s.urls : [s && s.urls];
+  return arr.some((x) => typeof x === "string" && x.toLowerCase().startsWith("turn:"));
+};
 let iceServersCache = null;
 async function fetchIceServers() {
   const now = Date.now();
-  if (iceServersCache && now - iceServersCache.at < 5 * 60 * 1000) return iceServersCache.servers;
+  if (iceServersCache && now - iceServersCache.at < 5 * 60 * 1000) return iceServersCache;
   let extra = [];
   try {
-    const r = await fetch(`/api/turn-credentials?token=${encodeURIComponent(state.token)}`);
+    const r = await fetch("/api/turn-credentials", { headers: { Authorization: "Bearer " + state.token } });
     if (r.ok) { const b = await r.json(); if (Array.isArray(b.iceServers)) extra = b.iceServers; }
-  } catch { /* TURN is optional, STUN-only still works */ }
+  } catch { /* TURN is optional; the consent-gated direct path still works */ }
   const servers = [...STUN_SERVERS, ...extra];
-  iceServersCache = { servers, at: now };
-  return servers;
+  const hasTurn = extra.some(isTurnServer);
+  iceServersCache = { servers, hasTurn, at: now };
+  return iceServersCache;
+}
+// Shown only when no relay is available, before any ICE gathering starts.
+function confirmCallIpExposure() {
+  return confirm("Heads up: no private relay is available for this call, so your IP address will be visible to the other person. Continue anyway?");
 }
 function sendCallSignal(peer, obj) {
   const content = { v: 1, t: "call", from: state.user, to: peer, id: randHex(8), ts: Date.now(), ...obj };
@@ -1125,7 +1155,15 @@ function sendCallSignal(peer, obj) {
   markSeen(content.id);
 }
 async function newPeerConnection(peer, callId) {
-  const pc = new RTCPeerConnection({ iceServers: await fetchIceServers() });
+  const ice = await fetchIceServers();
+  // Relay-only when TURN exists: the browser then gathers ONLY relay candidates,
+  // so the peer never sees the real IP. Without a relay we fall back to a direct
+  // connection (host/reflexive candidates), which is why startCall/acceptCall
+  // require explicit consent before reaching this point.
+  const config = ice.hasTurn
+    ? { iceServers: ice.servers.filter(isTurnServer), iceTransportPolicy: "relay" }
+    : { iceServers: ice.servers };
+  const pc = new RTCPeerConnection(config);
   pc.onicecandidate = (e) => { if (e.candidate) sendCallSignal(peer, { sub: "ice", callId, candidate: JSON.stringify(e.candidate) }); };
   pc.ontrack = (e) => {
     const c = state.call; if (!c) return;
@@ -1148,6 +1186,8 @@ async function getLocalMedia(video) {
 async function startCall(peer, video) {
   if (state.call) { toast("already in a call"); return; }
   if (isGroupKey(peer)) { toast("calls are 1:1 only"); return; }
+  const ice = await fetchIceServers();
+  if (!ice.hasTurn && !confirmCallIpExposure()) return; // user declined to expose their IP
   const callId = randHex(8);
   state.call = { peer, callId, video, role: "caller", state: "calling", pc: null, localStream: null, remoteStream: null, startedAt: 0, timer: null };
   try {
@@ -1175,6 +1215,8 @@ function handleCallSignal(c) {
 }
 async function acceptCall() {
   const call = state.call; if (!call || call.role !== "callee") return;
+  const ice = await fetchIceServers();
+  if (!ice.hasTurn && !confirmCallIpExposure()) { rejectCall(); return; } // decline rather than leak the IP
   try {
     const stream = await getLocalMedia(call.video); call.localStream = stream;
     const pc = await newPeerConnection(call.peer, call.callId); call.pc = pc;

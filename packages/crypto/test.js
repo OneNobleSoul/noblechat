@@ -4,6 +4,7 @@ import {
   seal, open, randomBytes, utf8ToBytes, bytesToUtf8, timingSafeEqual,
   generateKemKeypair, kemPublicBundle, encapsulate, decapsulate,
   generateSignKeypair, signPublicBundle, sign, verify,
+  randomUnitFloat, randomIndex,
 } from "./src/index.js";
 
 test("AEAD round-trips and rejects tampering", () => {
@@ -49,4 +50,28 @@ test("hybrid signatures verify and reject forgery", () => {
   // breaking only the classical half must still fail verification
   sig.ed[0] ^= 0x01;
   assert.ok(!verify(pub, msg, sig));
+});
+
+test("randomUnitFloat stays in [0,1) and varies", () => {
+  let min = 1, max = 0; const seen = new Set();
+  for (let i = 0; i < 5000; i++) {
+    const v = randomUnitFloat();
+    assert.ok(v >= 0 && v < 1, `out of range: ${v}`);
+    min = Math.min(min, v); max = Math.max(max, v); seen.add(v);
+  }
+  assert.ok(seen.size > 4900, "should not repeat much"); // CSPRNG, not a constant
+  assert.ok(min < 0.1 && max > 0.9, "should cover the range");
+});
+
+test("randomIndex is uniform-ish over [0,n) and never out of bounds", () => {
+  assert.equal(randomIndex(1), 0);
+  assert.equal(randomIndex(0), 0);
+  const n = 5; const counts = new Array(n).fill(0);
+  for (let i = 0; i < 20000; i++) {
+    const x = randomIndex(n);
+    assert.ok(Number.isInteger(x) && x >= 0 && x < n, `out of range: ${x}`);
+    counts[x]++;
+  }
+  // every bucket hit, none wildly skewed (expected ~4000 each)
+  for (const c of counts) assert.ok(c > 3000 && c < 5000, `skewed bucket: ${c}`);
 });

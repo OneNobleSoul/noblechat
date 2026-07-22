@@ -6,7 +6,15 @@
 // (bitwise unlinkability). Built on Ristretto255 (prime-order group) so the
 // blinding arithmetic is exact.
 //
-// Faithful to Danezis-Goldberg Sphinx (header + filler + payload onion).
+// Structure follows Danezis-Goldberg Sphinx (header + filler + payload onion),
+// with one deliberate simplification: the payload is a per-hop XOR stream, not a
+// LIONESS wide-block cipher. So the HEADER is integrity-protected (a per-hop MAC
+// rejects a tampered header) but the PAYLOAD is malleable - a malicious hop can
+// tag the payload and correlate a packet's input to its delivery. That is NOT
+// full tagging resistance; it is acceptable only for the current single-operator
+// deployment (the operator already holds the metadata) and the Nym-backed path,
+// which does not use this packet format at all. A multi-operator network would
+// need a wide-block payload cipher and a replay cache. See onionEncrypt below.
 import { RistrettoPoint, ed25519 } from "@noble/curves/ed25519";
 import { chacha20 } from "@noble/ciphers/chacha";
 import { hmac } from "@noble/hashes/hmac";
@@ -137,6 +145,11 @@ function createHeader(path, secrets, alphas) {
 }
 
 // ---- payload onion (length-preserving) -----------------------------------
+// NOTE: this is a plain per-hop XOR stream, which is malleable and carries no
+// per-hop integrity. A malicious hop can flip payload bits (tagging) to mark a
+// packet and recognise it at the exit. A production multi-operator network
+// would replace this with a wide-block cipher (LIONESS) so any payload change
+// randomises the whole block. Kept simple deliberately for the current model.
 function onionEncrypt(secrets, inner) {
   // refuse oversized payloads loudly - silently truncating would corrupt the
   // envelope and the message would vanish without a trace at the recipient
@@ -172,7 +185,10 @@ export function processPacket(nodeSecret, packet) {
   const alpha = RistrettoPoint.fromHex(header.alpha);
   const s = alpha.multiply(nodeSecret).toRawBytes();
 
-  // integrity: reject anything tampered (defeats tagging attacks)
+  // integrity: this per-hop MAC covers the HEADER (beta/gamma) only, so a
+  // tampered header is rejected here. It does NOT cover the payload - the
+  // payload onion is a malleable XOR stream (see onionEncrypt), so this check
+  // does not stop payload tagging attacks.
   if (!eqBytes(mac(subkey("mu", s), header.beta), header.gamma)) {
     throw new Error("sphinx: MAC verification failed");
   }

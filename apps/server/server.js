@@ -203,6 +203,11 @@ async function main() {
     return false;
   };
   async function sessionUser(token) { if (!token || typeof token !== "string") return null; const s = await store.getSession(token); return s ? s.username : null; }
+  // Prefer the session token from the Authorization header so it never lands in
+  // request URLs (and thus not in reverse-proxy access logs or browser history).
+  // The query-param path stays as a fallback so tabs still holding an older
+  // client keep working through the rollout.
+  function sessionToken(req, url) { const m = /^Bearer (.+)$/.exec(req.headers["authorization"] || ""); return (m && m[1]) || url.searchParams.get("token"); }
 
   function serveStatic(req, res) {
     let rel = req.url.split("?")[0]; if (rel === "/") rel = "/index.html";
@@ -328,7 +333,7 @@ async function main() {
       // presence oracle. Kept coarse (per handle, no timestamps).
       if (url.pathname === "/api/presence") {
         if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" });
-        const username = await sessionUser(url.searchParams.get("token"));
+        const username = await sessionUser(sessionToken(req, url));
         if (!username) return json(res, 401, { error: "not signed in" });
         const handles = String(url.searchParams.get("handles") || "").toLowerCase().split(",").filter((h) => HANDLE_RE.test(h)).slice(0, 100);
         // Return the online handles as a list rather than writing them as keys
@@ -348,7 +353,7 @@ async function main() {
       // stays on its built-in STUN servers as before.
       if (url.pathname === "/api/turn-credentials") {
         if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" });
-        const username = await sessionUser(url.searchParams.get("token"));
+        const username = await sessionUser(sessionToken(req, url));
         if (!username) return json(res, 401, { error: "not signed in" });
         return json(res, 200, { iceServers: turnIceServers(CFG) });
       }
@@ -357,7 +362,7 @@ async function main() {
       // end-to-end message, so the server stores and serves bytes it can't read.
       if (url.pathname === "/api/upload" && req.method === "POST") {
         if (!httpLimit(ip, 4)) return json(res, 429, { error: "rate limited" });
-        const username = await sessionUser(url.searchParams.get("token"));
+        const username = await sessionUser(sessionToken(req, url));
         if (!username) return json(res, 401, { error: "not signed in" });
         if (await store.isBanned(username)) return json(res, 403, { error: "account suspended" });
         const mime = String(req.headers["x-file-type"] || "application/octet-stream").slice(0, 100);
@@ -413,7 +418,7 @@ async function main() {
       if (url.pathname === "/api/account/blob") {
         if (req.method === "GET") {
           if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" });
-          const username = await sessionUser(url.searchParams.get("token"));
+          const username = await sessionUser(sessionToken(req, url));
           if (!username) return json(res, 401, { error: "not signed in" });
           return json(res, 200, { blob: await store.getBlob(username) });
         }
