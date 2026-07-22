@@ -8,10 +8,10 @@ import {
   makeBrowserNet, serializePacket, serializeCard, deserializeCard,
   serializeIdentity, deserializeIdentity,
 } from "../../../packages/net/src/serialize.js";
-import { toB64, fromB64, randomUnitFloat } from "../../../packages/crypto/src/util.js";
+import { toB64, fromB64, randomUnitFloat, keysFingerprint } from "../../../packages/crypto/src/util.js";
 
 const $ = (s) => document.querySelector(s);
-const K = { token: "noblechat:token", user: "noblechat:user", dev: "noblechat:deviceId", id: "noblechat:id", bkey: "noblechat:bkey", contacts: "noblechat:contacts", prefs: "noblechat:prefs", history: "noblechat:history" };
+const K = { token: "noblechat:token", user: "noblechat:user", dev: "noblechat:deviceId", id: "noblechat:id", bkey: "noblechat:bkey", contacts: "noblechat:contacts", prefs: "noblechat:prefs", history: "noblechat:history", pins: "noblechat:pins" };
 const HISTORY_PER_CHAT = 300; // cap stored messages per conversation
 const GATE_HASH = "b34f7fb73eea21931199bcd983951029b3df3ef407a7e58d617cf03747014f1a";
 const GATE_OK = "noblechat:gate-ok";
@@ -25,7 +25,7 @@ const state = {
   transport: "internal", nymAddress: null,
   soundOn: true, muted: new Set(), blocked: new Set(), unread: new Map(),
   presence: new Map(), presenceTimer: null, histTimer: null, expireTimer: null,
-  replyingTo: null, groups: new Map(), call: null,
+  replyingTo: null, groups: new Map(), call: null, pins: new Map(),
 };
 
 const ls = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* */ } }, del: (k) => { try { localStorage.removeItem(k); } catch { /* */ } } };
@@ -43,7 +43,7 @@ function markSeen(id) {
   }
 }
 function toast(msg) { const t = $("#toast"); t.hidden = false; t.textContent = msg; requestAnimationFrame(() => t.classList.add("show")); clearTimeout(toast._t); toast._t = setTimeout(() => { t.classList.remove("show"); setTimeout(() => (t.hidden = true), 250); }, 2600); }
-function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function simpleHash(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; }
 function poisson(mean) { return -mean * Math.log(1 - randomUnitFloat()); }
 
@@ -239,6 +239,7 @@ async function registerDevice() {
 
 async function afterAuth() {
   loadPrefs();
+  loadPins();
   await loadMyBundle();
   loadContactsLocal();
   await loadConvos();
@@ -298,7 +299,7 @@ function loadContactsLocal() {
     const raw = JSON.parse(ls.get(K.contacts) || "[]");
     // legacy format was a bare array of {handle,cards}; new one wraps groups too
     const arr = Array.isArray(raw) ? raw : (raw.contacts || []);
-    for (const entry of arr) state.contacts.set(entry.handle, entry.cards.map(deserializeCard));
+    for (const entry of arr) { const cards = entry.cards.map(deserializeCard); checkPin(entry.handle, cards); state.contacts.set(entry.handle, cards); }
     if (!Array.isArray(raw)) for (const g of (raw.groups || [])) if (g && g.id) state.groups.set(g.id, g);
   } catch { /* */ }
 }
@@ -362,6 +363,25 @@ async function loadContactsFromBlob() {
   } catch { /* */ }
 }
 
+// ---- TOFU key pinning ----------------------------------------------------
+// The server hands us a handle's device cards, so a malicious/compromised
+// server could swap them to impersonate someone. We pin the fingerprint of a
+// handle's signing keys on first sight; if it ever changes we surface it to the
+// user (the "safety number changed" signal) instead of trusting silently. We
+// still adopt the new keys so a genuine reinstall/new device keeps working -
+// the point is that the change is no longer invisible.
+function loadPins() { try { state.pins = new Map(Object.entries(JSON.parse(ls.get(K.pins) || "{}"))); } catch { state.pins = new Map(); } }
+function savePins() { const o = {}; for (const [h, fp] of state.pins) o[h] = fp; ls.set(K.pins, JSON.stringify(o)); }
+function cardsFingerprint(cards) { return (cards && cards.length) ? keysFingerprint(cards.map((c) => c.sign)) : ""; }
+function checkPin(handle, cards) {
+  if (!handle || handle === state.user) return; // our own keys need no pin
+  const fp = cardsFingerprint(cards);
+  if (!fp) return;
+  const known = state.pins.get(handle);
+  if (known && known !== fp) toast(`⚠ ${handle}'s security keys changed - verify it is really them`);
+  if (known !== fp) { state.pins.set(handle, fp); savePins(); }
+}
+
 async function fetchBundle(handle, { silent = true, noSave = false } = {}) {
   handle = String(handle).trim().toLowerCase();
   if (!handle) return false;
@@ -371,7 +391,9 @@ async function fetchBundle(handle, { silent = true, noSave = false } = {}) {
     const r = await fetch("/api/bundle?handle=" + encodeURIComponent(handle));
     if (!r.ok) { if (!silent) toast("no such handle online"); return false; }
     const j = await r.json();
-    state.contacts.set(handle, (j.devices || []).map(deserializeCard));
+    const cards = (j.devices || []).map(deserializeCard);
+    checkPin(handle, cards);
+    state.contacts.set(handle, cards);
     saveContactsLocal(); if (!noSave) uploadContactsBlob();
     renderContacts();
     if (!silent) setActive(handle);
@@ -437,7 +459,7 @@ async function verifySender(handle, verify) {
     // as a contact as a side effect of the lookup
     try {
       const r = await fetch("/api/bundle?handle=" + encodeURIComponent(handle));
-      if (r.ok) { const j = await r.json(); state.contacts.set(handle, (j.devices || []).map(deserializeCard)); }
+      if (r.ok) { const j = await r.json(); const cards = (j.devices || []).map(deserializeCard); checkPin(handle, cards); state.contacts.set(handle, cards); }
     } catch { /* offline: fall through, check() decides */ }
   }
   return check();
@@ -1209,7 +1231,7 @@ function handleCallSignal(c) {
     return;
   }
   const call = state.call; if (!call || call.callId !== c.callId) return;
-  if (c.sub === "answer") { call.pc && call.pc.setRemoteDescription(JSON.parse(c.sdp)).catch(() => {}); }
+  if (c.sub === "answer") { try { call.pc && call.pc.setRemoteDescription(JSON.parse(c.sdp)).catch(() => {}); } catch { /* malformed answer SDP: ignore rather than throw out of the handler */ } }
   else if (c.sub === "ice") { try { call.pc && call.pc.addIceCandidate(JSON.parse(c.candidate)).catch(() => {}); } catch { /* */ } }
   else if (c.sub === "hangup" || c.sub === "reject") { toast(c.sub === "reject" ? "call declined" : "call ended"); endCall(false); }
 }

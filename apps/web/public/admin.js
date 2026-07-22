@@ -125,7 +125,7 @@ async function loadUsers() {
   for (const u of active) {
     const tr = document.createElement("tr");
     const badge = u.is_admin ? ` <span class="pill on">admin</span>` : "";
-    tr.innerHTML = `<td>${esc(u.username)}${badge}</td><td>${u.devices || 0}</td><td class="muted">${fmtTime(u.created_at)}</td>`;
+    tr.innerHTML = `<td>${esc(u.username)}${badge}</td><td>${Number(u.devices) || 0}</td><td class="muted">${esc(fmtTime(u.created_at))}</td>`;
     const td = document.createElement("td"); td.style.textAlign = "right";
     const adm = document.createElement("button"); adm.className = "btn ghost"; adm.textContent = u.is_admin ? "Revoke admin" : "Make admin";
     adm.onclick = () => setAdmin(u.username, !u.is_admin);
