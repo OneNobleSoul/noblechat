@@ -3,7 +3,9 @@ FROM node:22-slim
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm install --no-audit --no-fund
+# npm ci installs exactly what the lockfile pins (reproducible, fails on drift),
+# instead of npm install which can silently resolve to newer transitive versions.
+RUN npm ci --no-audit --no-fund
 
 COPY . .
 RUN node scripts/build-web.js
