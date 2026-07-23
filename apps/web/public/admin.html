@@ -52,12 +52,13 @@ th{color:var(--dim);font-family:var(--mono);font-size:11px;text-transform:upperc
   <div id="login" class="card">
     <h1>◆ NobleChat Admin</h1>
     <p class="sub">Restricted. Sign in with an admin account.</p>
-    <label>Handle</label>
+    <label for="login-user">Handle</label>
     <input id="login-user" type="text" placeholder="handle" autocomplete="username">
-    <label>Password</label>
+    <label for="login-pass">Password</label>
     <input id="login-pass" type="password" placeholder="password" autocomplete="current-password">
     <button id="login-acct" class="btn">Sign in</button>
     <p class="muted" style="margin:16px 0 6px">Or use the admin token</p>
+    <label for="token">Admin token</label>
     <input id="token" type="password" placeholder="admin token" autocomplete="off">
     <button id="login-go" class="btn ghost">Sign in with token</button>
     <p id="login-err" class="err hidden">Invalid credentials.</p>
@@ -116,6 +117,7 @@ th{color:var(--dim);font-family:var(--mono);font-size:11px;text-transform:upperc
 
     <div class="card">
       <h2>Announcement</h2>
+      <label for="ann">Message</label>
       <textarea id="ann" rows="2" placeholder="Message shown to everyone (leave empty to clear)"></textarea>
       <div class="row"><button id="ann-save" class="btn">Publish</button><button id="ann-clear" class="btn ghost">Clear</button></div>
     </div>
@@ -123,7 +125,7 @@ th{color:var(--dim);font-family:var(--mono);font-size:11px;text-transform:upperc
     <div class="card">
       <h2>Maintenance mode</h2>
       <div class="row" style="margin-bottom:12px"><span>Status:</span> <span id="maint-pill" class="pill">-</span></div>
-      <label>Maintenance message (optional)</label>
+      <label for="maint-msg">Maintenance message (optional)</label>
       <input id="maint-msg" placeholder="We'll be right back…">
       <div class="row"><button id="maint-on" class="btn warn">Enable maintenance</button><button id="maint-off" class="btn ghost">Disable</button></div>
     </div>
