@@ -1366,15 +1366,31 @@ function endCall(sendHangup = true) {
   state.call = null;
   hideIncoming(); hideCall();
 }
-function toggleMic() { const c = state.call; if (!c || !c.localStream) return; const t = c.localStream.getAudioTracks()[0]; if (t) { t.enabled = !t.enabled; $("#call-mic").classList.toggle("off", !t.enabled); } }
-function toggleCam() { const c = state.call; if (!c || !c.localStream) return; const t = c.localStream.getVideoTracks()[0]; if (t) { t.enabled = !t.enabled; $("#call-cam").classList.toggle("off", !t.enabled); } }
+function toggleMic() {
+  const c = state.call; if (!c || !c.localStream) return;
+  const t = c.localStream.getAudioTracks()[0]; if (!t) return;
+  t.enabled = !t.enabled;
+  const btn = $("#call-mic"); if (!btn) return;
+  btn.classList.toggle("off", !t.enabled);
+  btn.setAttribute("aria-pressed", String(!t.enabled));
+  btn.setAttribute("aria-label", t.enabled ? "Mute microphone" : "Unmute microphone");
+}
+function toggleCam() {
+  const c = state.call; if (!c || !c.localStream) return;
+  const t = c.localStream.getVideoTracks()[0]; if (!t) return;
+  t.enabled = !t.enabled;
+  const btn = $("#call-cam"); if (!btn) return;
+  btn.classList.toggle("off", !t.enabled);
+  btn.setAttribute("aria-pressed", String(!t.enabled));
+  btn.setAttribute("aria-label", t.enabled ? "Turn off camera" : "Turn on camera");
+}
 function startCallTimer() {
   const c = state.call; if (!c) return;
   c.timer = setInterval(() => { const el = $("#call-timer"); if (el && c.startedAt) { const s = Math.floor((Date.now() - c.startedAt) / 1000); el.textContent = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`; } }, 1000);
 }
 function showIncoming(peer, video) {
   const el = ensureEl("call-incoming", "call-incoming");
-  el.innerHTML = `<div class="ci-card"><div class="ci-avatar">${esc(peer[0] || "?").toUpperCase()}</div><div class="ci-name">${esc(peer)}</div><div class="ci-sub">incoming ${video ? "video" : "voice"} call…</div><div class="ci-actions"><button id="ci-reject" class="call-btn hangup">✕</button><button id="ci-accept" class="call-btn accept">📞</button></div></div>`;
+  el.innerHTML = `<div class="ci-card"><div class="ci-avatar">${esc(peer[0] || "?").toUpperCase()}</div><div class="ci-name">${esc(peer)}</div><div class="ci-sub">incoming ${video ? "video" : "voice"} call…</div><div class="ci-actions"><button id="ci-reject" class="call-btn hangup" title="Decline" aria-label="Decline call">✕</button><button id="ci-accept" class="call-btn accept" title="Accept" aria-label="Accept call">📞</button></div></div>`;
   el.hidden = false;
   $("#ci-accept").onclick = acceptCall; $("#ci-reject").onclick = rejectCall;
 }
@@ -1388,9 +1404,9 @@ function showCall() {
       <div id="call-audio-ph" class="call-audio-ph"><div class="ci-avatar big">${esc((state.call?.peer || "?")[0].toUpperCase())}</div><div class="ci-name">${esc(state.call?.peer || "")}</div><div id="call-status" class="ci-sub">calling…</div></div>
     </div>
     <div class="call-bar">
-      <button id="call-mic" class="call-btn" title="Mute">🎤</button>
-      ${state.call?.video ? '<button id="call-cam" class="call-btn" title="Camera">📷</button>' : ""}
-      <button id="call-end" class="call-btn hangup" title="Hang up">📞</button>
+      <button id="call-mic" class="call-btn" title="Mute" aria-label="Mute microphone" aria-pressed="false">🎤</button>
+      ${state.call?.video ? '<button id="call-cam" class="call-btn" title="Camera" aria-label="Turn off camera" aria-pressed="false">📷</button>' : ""}
+      <button id="call-end" class="call-btn hangup" title="Hang up" aria-label="Hang up">📞</button>
       <span id="call-timer" class="call-timer"></span>
     </div>`;
   el.hidden = false;
