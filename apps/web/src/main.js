@@ -9,6 +9,7 @@ import {
   serializeIdentity, deserializeIdentity,
 } from "../../../packages/net/src/serialize.js";
 import { toB64, fromB64, randomUnitFloat, keysFingerprint } from "../../../packages/crypto/src/util.js";
+import { esc, simpleHash, fileMime, mimeKind } from "./text-utils.js";
 
 const $ = (s) => document.querySelector(s);
 const K = { token: "noblechat:token", user: "noblechat:user", dev: "noblechat:deviceId", id: "noblechat:id", bkey: "noblechat:bkey", contacts: "noblechat:contacts", prefs: "noblechat:prefs", history: "noblechat:history", pins: "noblechat:pins" };
@@ -43,8 +44,6 @@ function markSeen(id) {
   }
 }
 function toast(msg) { const t = $("#toast"); t.hidden = false; t.textContent = msg; requestAnimationFrame(() => t.classList.add("show")); clearTimeout(toast._t); toast._t = setTimeout(() => { t.classList.remove("show"); setTimeout(() => (t.hidden = true), 250); }, 2600); }
-function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
-function simpleHash(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; }
 function poisson(mean) { return -mean * Math.log(1 - randomUnitFloat()); }
 
 async function sha256Hex(str) { const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str)); return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join(""); }
@@ -779,11 +778,6 @@ function clearReply() { state.replyingTo = null; const bar = $("#reply-bar"); if
 
 // ---------- file attachments (encrypted; server stores only ciphertext) ----------
 const MAX_FILE_BYTES = 500 * 1024 * 1024;
-// map extensions to a mime when the browser gives us none (common for .mov)
-const MEDIA_EXT = { mov: "video/quicktime", mp4: "video/mp4", m4v: "video/mp4", webm: "video/webm", ogv: "video/ogg", mkv: "video/x-matroska", mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav", ogg: "audio/ogg", oga: "audio/ogg", aac: "audio/aac", flac: "audio/flac", opus: "audio/ogg" };
-function fileMime(file) { if (file.type) return file.type; const ext = (file.name.split(".").pop() || "").toLowerCase(); return MEDIA_EXT[ext] || "application/octet-stream"; }
-// which inline preview a mime gets: image, video, audio, or "" (download only)
-function mimeKind(mime) { const m = String(mime || ""); return m.startsWith("image/") ? "image" : m.startsWith("video/") ? "video" : m.startsWith("audio/") ? "audio" : ""; }
 async function decryptBytes(keyRaw, blob) {
   const key = await crypto.subtle.importKey("raw", keyRaw, { name: "AES-GCM" }, false, ["decrypt"]);
   const raw = new Uint8Array(blob);
