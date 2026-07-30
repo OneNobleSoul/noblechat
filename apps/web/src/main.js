@@ -9,7 +9,7 @@ import {
   serializeIdentity, deserializeIdentity,
 } from "../../../packages/net/src/serialize.js";
 import { toB64, fromB64, randomUnitFloat, keysFingerprint } from "../../../packages/crypto/src/util.js";
-import { esc, simpleHash, fileMime, mimeKind } from "./text-utils.js";
+import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining } from "./text-utils.js";
 
 const $ = (s) => document.querySelector(s);
 const K = { token: "noblechat:token", user: "noblechat:user", dev: "noblechat:deviceId", id: "noblechat:id", bkey: "noblechat:bkey", contacts: "noblechat:contacts", prefs: "noblechat:prefs", history: "noblechat:history", pins: "noblechat:pins" };
@@ -1055,11 +1055,6 @@ function openChatMenu() {
   buildMenu(pop, state.active, { includeClear: true });
   const wasOpen = pop.classList.contains("open"); closeMenus();
   if (!wasOpen) { pop.hidden = false; pop.classList.add("open"); }
-}
-function fmtSize(n) { n = Number(n) || 0; if (n < 1024) return n + " B"; if (n < 1048576) return (n / 1024).toFixed(0) + " KB"; return (n / 1048576).toFixed(1) + " MB"; }
-function fmtRemaining(ms) {
-  const s = Math.max(0, Math.round(ms / 1000));
-  if (s < 60) return s + "s"; if (s < 3600) return Math.round(s / 60) + "m"; if (s < 86400) return Math.round(s / 3600) + "h"; return Math.round(s / 86400) + "d";
 }
 function reactionsHtml(m) {
   if (!m.reactions) return "";

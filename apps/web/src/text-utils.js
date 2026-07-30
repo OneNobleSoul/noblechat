@@ -26,3 +26,21 @@ export function mimeKind(mime) {
   const m = String(mime || "");
   return m.startsWith("image/") ? "image" : m.startsWith("video/") ? "video" : m.startsWith("audio/") ? "audio" : "";
 }
+
+// human-readable file size for attachment rows (B/KB/MB, no fractional bytes)
+export function fmtSize(n) {
+  n = Number(n) || 0;
+  if (n < 1024) return n + " B";
+  if (n < 1048576) return (n / 1024).toFixed(0) + " KB";
+  return (n / 1048576).toFixed(1) + " MB";
+}
+
+// how much time is left on an auto-delete timer, in the coarsest unit that
+// still fits (seconds up to a minute, then minutes/hours/days)
+export function fmtRemaining(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return s + "s";
+  if (s < 3600) return Math.round(s / 60) + "m";
+  if (s < 86400) return Math.round(s / 3600) + "h";
+  return Math.round(s / 86400) + "d";
+}
