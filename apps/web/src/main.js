@@ -1080,13 +1080,17 @@ function renderMessages() {
       else if (kind === "image" || kind === "video" || kind === "audio") {
         const exp = f.expireAt ? `<span class="att-timer" title="auto-deletes">🕓 ${fmtRemaining(f.expireAt - Date.now())}</span>` : "";
         const ic = kind === "video" ? "🎬" : kind === "audio" ? "🎵" : "🖼";
-        inner += `<div class="att att-media att-${esc(kind)}" data-mi="${i}"${f.expireAt ? ` data-exp="${Number(f.expireAt) || ""}"` : ""}><div class="att-ph">${ic} ${esc(f.name)} · tap to load ${exp}</div></div>` + (m.body ? `<div class="att-cap">${esc(m.body)}</div>` : "");
-      } else inner += `<div class="att att-file" data-mi="${i}"><span class="att-ic">📄</span><span class="att-meta"><b>${esc(f.name)}</b><span>${fmtSize(f.size)} · tap to download</span></span></div>` + (m.body ? `<div class="att-cap">${esc(m.body)}</div>` : "");
+        inner += `<div class="att att-media att-${esc(kind)}" data-mi="${i}" tabindex="0" role="button" aria-label="${esc(f.name)} attachment"${f.expireAt ? ` data-exp="${Number(f.expireAt) || ""}"` : ""}><div class="att-ph">${ic} ${esc(f.name)} · tap to load ${exp}</div></div>` + (m.body ? `<div class="att-cap">${esc(m.body)}</div>` : "");
+      } else inner += `<div class="att att-file" data-mi="${i}" tabindex="0" role="button" aria-label="${esc(f.name)} attachment, ${fmtSize(f.size)}"><span class="att-ic">📄</span><span class="att-meta"><b>${esc(f.name)}</b><span>${fmtSize(f.size)} · tap to download</span></span></div>` + (m.body ? `<div class="att-cap">${esc(m.body)}</div>` : "");
     }
     const unv = m.unverified ? `<span class="msg-unverified" title="This message verified only against changed, unconfirmed keys">⚠ unverified sender</span>` : "";
     return `<div class="msg ${m.dir}${m.unverified ? " unverified" : ""}" data-mi="${i}">${inner}${unv}<span class="t">${time}</span>${reactionsHtml(m)}</div>`;
   }).join("");
-  el.querySelectorAll(".att").forEach((a) => a.addEventListener("click", (e) => { e.stopPropagation(); if (a.dataset.loaded) { if (a.dataset.kind === "image") openLightbox(a); return; } openAttachment(msgs[Number(a.dataset.mi)], a); }));
+  el.querySelectorAll(".att").forEach((a) => {
+    const activate = (e) => { e.stopPropagation(); if (a.dataset.loaded) { if (a.dataset.kind === "image") openLightbox(a); return; } openAttachment(msgs[Number(a.dataset.mi)], a); };
+    a.addEventListener("click", activate);
+    a.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activate(e); } });
+  });
   el.querySelectorAll(".rc").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); toggleReaction(state.active, msgs[Number(b.closest(".msg").dataset.mi)], b.dataset.emoji); }));
   el.querySelectorAll(".msg").forEach((n) => n.addEventListener("click", (e) => { if (e.target.closest(".att,.rc,.reply-quote")) return; e.stopPropagation(); openMessageMenu(state.active, msgs[Number(n.dataset.mi)], n); }));
   el.scrollTop = el.scrollHeight;
