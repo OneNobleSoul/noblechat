@@ -10,6 +10,7 @@ import {
 } from "../../../packages/net/src/serialize.js";
 import { toB64, fromB64, randomUnitFloat, keysFingerprint } from "../../../packages/crypto/src/util.js";
 import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining } from "./text-utils.js";
+import { parsePinsJson, pinsToObject, mergeSyncedPin } from "./pin-utils.js";
 
 const $ = (s) => document.querySelector(s);
 const K = { token: "noblechat:token", user: "noblechat:user", dev: "noblechat:deviceId", id: "noblechat:id", bkey: "noblechat:bkey", contacts: "noblechat:contacts", prefs: "noblechat:prefs", history: "noblechat:history", pins: "noblechat:pins" };
@@ -333,7 +334,7 @@ async function loadConvos() {
 async function uploadContactsBlob() {
   if (!state.blobKey || !state.token) return;
   try {
-    const payload = { v: 3, contacts: [...state.contacts.keys()], muted: [...state.muted], blocked: [...state.blocked], groups: [...state.groups.values()], pins: pinsToObject() };
+    const payload = { v: 3, contacts: [...state.contacts.keys()], muted: [...state.muted], blocked: [...state.blocked], groups: [...state.groups.values()], pins: pinsToObject(state.pins) };
     const blob = await encryptBlob(state.blobKey, payload);
     await fetch("/api/account/blob", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: state.token, blob }) });
   } catch { /* */ }
@@ -357,10 +358,8 @@ async function loadContactsFromBlob() {
       // the server serves. On conflict take the more cautious state (unverified
       // wins) so a synced "verified" can't paper over a local key change.
       for (const [h, p] of Object.entries(data.pins || {})) {
-        if (!p || !p.fp) continue;
-        const local = state.pins.get(h);
-        if (!local) state.pins.set(h, { fp: String(p.fp), ok: p.ok !== false });
-        else if (local.fp !== p.fp || local.ok === false || p.ok === false) state.pins.set(h, { fp: local.fp, ok: false });
+        const merged = mergeSyncedPin(state.pins.get(h), p);
+        if (merged) state.pins.set(h, merged);
       }
       savePins();
       savePrefs();
@@ -384,15 +383,8 @@ async function loadContactsFromBlob() {
 // band. Pins ride in the encrypted contacts blob too, so a fresh device
 // inherits them instead of silently re-trusting whatever the server serves.
 // A pin is { fp, ok }: ok === false means "keys changed, awaiting the user".
-function loadPins() {
-  try {
-    const o = JSON.parse(ls.get(K.pins) || "{}");
-    // Tolerate the older format where a pin was just the fingerprint string.
-    state.pins = new Map(Object.entries(o).map(([h, v]) => [h, typeof v === "string" ? { fp: v, ok: true } : { fp: String(v.fp || ""), ok: v.ok !== false }]));
-  } catch { state.pins = new Map(); }
-}
-function pinsToObject() { const o = {}; for (const [h, p] of state.pins) o[h] = { fp: p.fp, ok: p.ok !== false }; return o; }
-function savePins() { ls.set(K.pins, JSON.stringify(pinsToObject())); }
+function loadPins() { state.pins = parsePinsJson(ls.get(K.pins)); }
+function savePins() { ls.set(K.pins, JSON.stringify(pinsToObject(state.pins))); }
 function cardsFingerprint(cards) { return (cards && cards.length) ? keysFingerprint(cards.map((c) => c.sign)) : ""; }
 function isUnverified(handle) { const p = state.pins.get(handle); return !!(p && p.ok === false); }
 // Recipients of a conversation whose keys changed and are not yet re-confirmed.
