@@ -11,6 +11,7 @@ import {
 import { toB64, fromB64, randomUnitFloat, keysFingerprint } from "../../../packages/crypto/src/util.js";
 import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining } from "./text-utils.js";
 import { parsePinsJson, pinsToObject, mergeSyncedPin } from "./pin-utils.js";
+import { reactionsAfterToggle, canUnsend } from "./message-utils.js";
 
 const $ = (s) => document.querySelector(s);
 const K = { token: "noblechat:token", user: "noblechat:user", dev: "noblechat:deviceId", id: "noblechat:id", bkey: "noblechat:bkey", contacts: "noblechat:contacts", prefs: "noblechat:prefs", history: "noblechat:history", pins: "noblechat:pins" };
@@ -606,20 +607,15 @@ function findMsg(key, id) { const arr = state.convos.get(key); return arr ? arr.
 
 function applyReaction(key, c) {
   const m = findMsg(key, c.target); if (!m) return;
-  const who = c.from; const emoji = String(c.emoji || "").slice(0, 8); if (!emoji) return;
-  m.reactions = m.reactions || {};
-  let arr = m.reactions[emoji] || [];
-  if (c.remove) arr = arr.filter((h) => h !== who);
-  else if (!arr.includes(who)) arr.push(who);
-  if (arr.length) m.reactions[emoji] = arr; else delete m.reactions[emoji];
+  const emoji = String(c.emoji || "").slice(0, 8); if (!emoji) return;
+  m.reactions = reactionsAfterToggle(m.reactions, emoji, c.from, !!c.remove);
   if (state.active === key) renderMessages();
   scheduleSaveConvos();
 }
 function applyUnsend(key, c) {
   const m = findMsg(key, c.target); if (!m) return;
   // only the original sender may retract their own message
-  const origin = m.sender || (m.dir === "out" ? state.user : null);
-  if (origin && c.from !== origin) return;
+  if (!canUnsend(m, c.from, state.user)) return;
   m.deleted = true; delete m.file; delete m.reactions; delete m.replyTo; m.body = "";
   if (state.active === key) renderMessages();
   scheduleSaveConvos();
