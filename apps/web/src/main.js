@@ -11,7 +11,7 @@ import {
 import { toB64, fromB64, randomUnitFloat, keysFingerprint } from "../../../packages/crypto/src/util.js";
 import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining } from "./text-utils.js";
 import { parsePinsJson, pinsToObject, mergeSyncedPin } from "./pin-utils.js";
-import { reactionsAfterToggle, canUnsend } from "./message-utils.js";
+import { reactionsAfterToggle, canUnsend, trimHistory } from "./message-utils.js";
 
 const $ = (s) => document.querySelector(s);
 const K = { token: "noblechat:token", user: "noblechat:user", dev: "noblechat:deviceId", id: "noblechat:id", bkey: "noblechat:bkey", contacts: "noblechat:contacts", prefs: "noblechat:prefs", history: "noblechat:history", pins: "noblechat:pins" };
@@ -883,6 +883,7 @@ function pushMessage(handle, msg) {
   const arr = state.convos.get(handle);
   if (msg.id && arr.some((m) => m.id === msg.id)) return;
   arr.push(msg);
+  state.convos.set(handle, trimHistory(arr, HISTORY_PER_CHAT));
   if (state.active === handle) renderMessages();
   scheduleSaveConvos();
 }

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { reactionsAfterToggle, canUnsend } from "../apps/web/src/message-utils.js";
+import { reactionsAfterToggle, canUnsend, trimHistory } from "../apps/web/src/message-utils.js";
 
 test("reactionsAfterToggle adds a first reactor for an emoji", () => {
   const out = reactionsAfterToggle(undefined, "👍", "alice", false);
@@ -51,4 +51,28 @@ test("canUnsend falls back to dir=out plus selfHandle for older cached messages 
 
 test("canUnsend allows the retraction when neither sender nor an out direction can identify an origin", () => {
   assert.equal(canUnsend({}, "anyone", "alice"), true);
+});
+
+test("trimHistory leaves an array at or under the cap untouched", () => {
+  const arr = [{ id: 1 }, { id: 2 }, { id: 3 }];
+  assert.equal(trimHistory(arr, 3), arr);
+  assert.equal(trimHistory(arr, 10), arr);
+});
+
+test("trimHistory drops the oldest entries once the array exceeds the cap", () => {
+  const arr = [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }];
+  const out = trimHistory(arr, 3);
+  assert.deepEqual(out.map((m) => m.id), [3, 4, 5]);
+});
+
+test("trimHistory never mutates the input array", () => {
+  const arr = [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }];
+  const out = trimHistory(arr, 2);
+  assert.equal(arr.length, 4);
+  assert.notEqual(out, arr);
+});
+
+test("trimHistory with cap 0 returns an empty array", () => {
+  const arr = [{ id: 1 }, { id: 2 }];
+  assert.deepEqual(trimHistory(arr, 0), []);
 });
