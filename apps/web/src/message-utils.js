@@ -23,3 +23,14 @@ export function canUnsend(message, fromHandle, selfHandle) {
   const origin = message.sender || (message.dir === "out" ? selfHandle : null);
   return !origin || fromHandle === origin;
 }
+
+// Keeps the newest `cap` entries of a conversation's message list, dropping
+// the oldest ones once it grows past that. Without this, a conversation left
+// open for days accumulates messages in memory without bound (only the
+// on-disk copy was ever capped, via HISTORY_PER_CHAT at save time) - the same
+// class of leak SEEN_CAP already guards against for state.seen. Returns the
+// input array unchanged (same reference) when it's already within the cap,
+// so callers can skip a state.convos.set() when nothing actually changed.
+export function trimHistory(arr, cap) {
+  return arr.length > cap ? arr.slice(arr.length - cap) : arr;
+}
