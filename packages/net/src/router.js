@@ -7,11 +7,7 @@
 // is the same size and equally opaque.
 import { processPacket } from "../../sphinx/src/sphinx.js";
 import { unpackInner } from "../../protocol/src/protocol.js";
-import { toB64, randomUnitFloat } from "../../crypto/src/util.js";
-
-function poissonDelay(meanMs) {
-  return -meanMs * Math.log(1 - randomUnitFloat());
-}
+import { toB64, poissonDelay } from "../../crypto/src/util.js";
 
 // Default mailbox store: in-memory queue per mailbox. The gateway swaps in a
 // durable (Postgres-backed) store so ciphertext survives restarts and reaches

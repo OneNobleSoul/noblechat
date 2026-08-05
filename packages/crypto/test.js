@@ -4,7 +4,7 @@ import {
   seal, open, randomBytes, utf8ToBytes, bytesToUtf8, timingSafeEqual,
   generateKemKeypair, kemPublicBundle, encapsulate, decapsulate,
   generateSignKeypair, signPublicBundle, sign, verify,
-  randomUnitFloat, randomIndex, keysFingerprint,
+  randomUnitFloat, randomIndex, keysFingerprint, poissonDelay,
 } from "./src/index.js";
 
 test("AEAD round-trips and rejects tampering", () => {
@@ -74,6 +74,20 @@ test("randomIndex is uniform-ish over [0,n) and never out of bounds", () => {
   }
   // every bucket hit, none wildly skewed (expected ~4000 each)
   for (const c of counts) assert.ok(c > 3000 && c < 5000, `skewed bucket: ${c}`);
+});
+
+test("poissonDelay is never negative and averages out near its mean", () => {
+  assert.equal(poissonDelay(0), 0);
+  let sum = 0; const n = 20000; const mean = 40;
+  for (let i = 0; i < n; i++) {
+    const d = poissonDelay(mean);
+    assert.ok(d >= 0, `negative delay: ${d}`);
+    sum += d;
+  }
+  const avg = sum / n;
+  // exponential distribution: sample mean converges to the parameter, allow
+  // generous slack since this is a statistical test, not an exact one
+  assert.ok(avg > mean * 0.85 && avg < mean * 1.15, `sample mean ${avg} far from ${mean}`);
 });
 
 test("keysFingerprint is order-independent and change-sensitive", () => {

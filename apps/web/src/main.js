@@ -8,7 +8,7 @@ import {
   makeBrowserNet, serializePacket, serializeCard, deserializeCard,
   serializeIdentity, deserializeIdentity,
 } from "../../../packages/net/src/serialize.js";
-import { toB64, fromB64, randomUnitFloat, keysFingerprint } from "../../../packages/crypto/src/util.js";
+import { toB64, fromB64, poissonDelay, keysFingerprint } from "../../../packages/crypto/src/util.js";
 import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining } from "./text-utils.js";
 import { parsePinsJson, pinsToObject, mergeSyncedPin } from "./pin-utils.js";
 import { reactionsAfterToggle, canUnsend, trimHistory } from "./message-utils.js";
@@ -46,7 +46,6 @@ function markSeen(id) {
   }
 }
 function toast(msg) { const t = $("#toast"); t.hidden = false; t.textContent = msg; requestAnimationFrame(() => t.classList.add("show")); clearTimeout(toast._t); toast._t = setTimeout(() => { t.classList.remove("show"); setTimeout(() => (t.hidden = true), 250); }, 2600); }
-function poisson(mean) { return -mean * Math.log(1 - randomUnitFloat()); }
 
 async function sha256Hex(str) { const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str)); return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join(""); }
 
@@ -1155,7 +1154,7 @@ function toggleCover() {
   const b = $("#cover-toggle"); b.textContent = "cover: " + (state.coverOn ? "on" : "off"); b.classList.toggle("on", state.coverOn);
   if (state.coverOn) { toast("cover traffic on - hiding when you talk"); scheduleCover(); } else clearTimeout(state.coverTimer);
 }
-function scheduleCover() { clearTimeout(state.coverTimer); state.coverTimer = setTimeout(() => { sendCover(); if (state.coverOn) scheduleCover(); }, poisson(3500) + 800); }
+function scheduleCover() { clearTimeout(state.coverTimer); state.coverTimer = setTimeout(() => { sendCover(); if (state.coverOn) scheduleCover(); }, poissonDelay(3500) + 800); }
 function sendCover() { if (!state.ws || state.ws.readyState !== 1) return; try { activeTransport().submit(state.identity.card, { t: "cover", ts: 0 }); state.stats.cover++; updateStats(); emitPacket(""); } catch { /* */ } }
 
 // ---------- notification sound toggle ----------
