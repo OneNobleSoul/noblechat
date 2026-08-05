@@ -15,6 +15,17 @@ export function randomUnitFloat() {
   return v / 72057594037927936; // 2**56
 }
 
+// Exponentially distributed delay (mean meanMs) drawn from the CSPRNG float
+// above. This is the Poisson mixing delay used both by the in-process router
+// and the client's cover-traffic scheduler: no fixed batch interval an
+// observer could time against, and a predictable source here would weaken
+// that the same way a predictable randomUnitFloat would weaken path choice.
+// Was duplicated in packages/net/src/router.js and apps/web/src/main.js with
+// the same formula and zero tests in either place; lives here once now.
+export function poissonDelay(meanMs) {
+  return -meanMs * Math.log(1 - randomUnitFloat());
+}
+
 // Uniform integer in [0, n) from the CSPRNG, using rejection sampling so there
 // is no modulo bias. Used to pick mix nodes for a path.
 export function randomIndex(n) {
