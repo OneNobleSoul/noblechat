@@ -34,3 +34,16 @@ export function canUnsend(message, fromHandle, selfHandle) {
 export function trimHistory(arr, cap) {
   return arr.length > cap ? arr.slice(arr.length - cap) : arr;
 }
+
+// Decides whether the message list should auto-scroll to the newest message
+// after a re-render. renderMessages() rebuilds the whole list on things that
+// have nothing to do with what the user is currently looking at: a reaction
+// someone else added, a remote "delete for everyone", or the 5s sweep that
+// marks expired image attachments. Without this check every one of those
+// snapped the scroll position to the bottom, yanking it away from whoever
+// had scrolled up to read older messages. Only stick to the bottom if the
+// view was already close to it (small pixel slack via `threshold` since
+// browsers don't always report an exact 0).
+export function shouldStickToBottom(scrollTop, scrollHeight, clientHeight, threshold = 80) {
+  return scrollHeight - scrollTop - clientHeight <= threshold;
+}

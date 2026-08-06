@@ -11,7 +11,7 @@ import {
 import { toB64, fromB64, poissonDelay, keysFingerprint } from "../../../packages/crypto/src/util.js";
 import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining } from "./text-utils.js";
 import { parsePinsJson, pinsToObject, mergeSyncedPin } from "./pin-utils.js";
-import { reactionsAfterToggle, canUnsend, trimHistory } from "./message-utils.js";
+import { reactionsAfterToggle, canUnsend, trimHistory, shouldStickToBottom } from "./message-utils.js";
 
 const $ = (s) => document.querySelector(s);
 const K = { token: "noblechat:token", user: "noblechat:user", dev: "noblechat:deviceId", id: "noblechat:id", bkey: "noblechat:bkey", contacts: "noblechat:contacts", prefs: "noblechat:prefs", history: "noblechat:history", pins: "noblechat:pins" };
@@ -1054,6 +1054,13 @@ function reactionsHtml(m) {
 }
 function renderMessages() {
   const el = $("#messages"); const msgs = state.convos.get(state.active) || [];
+  // A re-render can be triggered by something unrelated to the current
+  // scroll position (a reaction, a remote delete, an image expiring). Only
+  // snap to the bottom if the view was already near it, unless the active
+  // conversation itself just changed (opening a chat should land at the
+  // newest message regardless of where the previous one was scrolled).
+  const switchedConvo = el.dataset.convo !== String(state.active || "");
+  const stick = switchedConvo || shouldStickToBottom(el.scrollTop, el.scrollHeight, el.clientHeight);
   const inGroup = isGroupKey(state.active);
   el.innerHTML = msgs.map((m, i) => {
     const time = new Date(m.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -1081,7 +1088,8 @@ function renderMessages() {
   });
   el.querySelectorAll(".rc").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); toggleReaction(state.active, msgs[Number(b.closest(".msg").dataset.mi)], b.dataset.emoji); }));
   el.querySelectorAll(".msg").forEach((n) => n.addEventListener("click", (e) => { if (e.target.closest(".att,.rc,.reply-quote")) return; e.stopPropagation(); openMessageMenu(state.active, msgs[Number(n.dataset.mi)], n); }));
-  el.scrollTop = el.scrollHeight;
+  el.dataset.convo = String(state.active || "");
+  if (stick) el.scrollTop = el.scrollHeight;
 }
 // popover with quick reactions + reply/copy/delete for a single message
 const QUICK_REACTS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
