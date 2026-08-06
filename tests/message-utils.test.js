@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { reactionsAfterToggle, canUnsend, trimHistory } from "../apps/web/src/message-utils.js";
+import { reactionsAfterToggle, canUnsend, trimHistory, shouldStickToBottom } from "../apps/web/src/message-utils.js";
 
 test("reactionsAfterToggle adds a first reactor for an emoji", () => {
   const out = reactionsAfterToggle(undefined, "👍", "alice", false);
@@ -75,4 +75,25 @@ test("trimHistory never mutates the input array", () => {
 test("trimHistory with cap 0 returns an empty array", () => {
   const arr = [{ id: 1 }, { id: 2 }];
   assert.deepEqual(trimHistory(arr, 0), []);
+});
+
+test("shouldStickToBottom is true when already scrolled exactly to the bottom", () => {
+  assert.equal(shouldStickToBottom(920, 1000, 80), true);
+});
+
+test("shouldStickToBottom is true within the pixel-slack threshold", () => {
+  assert.equal(shouldStickToBottom(870, 1000, 80), true);
+});
+
+test("shouldStickToBottom is false when scrolled well above the bottom", () => {
+  assert.equal(shouldStickToBottom(200, 1000, 80), false);
+});
+
+test("shouldStickToBottom is true for an empty or not-yet-overflowing list", () => {
+  assert.equal(shouldStickToBottom(0, 200, 400), true);
+});
+
+test("shouldStickToBottom respects a custom threshold", () => {
+  assert.equal(shouldStickToBottom(500, 1000, 400, 10), false);
+  assert.equal(shouldStickToBottom(590, 1000, 400, 10), true);
 });
