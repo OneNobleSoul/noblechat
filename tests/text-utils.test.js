@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining } from "../apps/web/src/text-utils.js";
+import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining, normalizeFile } from "../apps/web/src/text-utils.js";
 
 test("esc escapes every HTML-significant character used to render messages", () => {
   assert.equal(esc("<script>alert('hi')</script>"), "&lt;script&gt;alert(&#39;hi&#39;)&lt;/script&gt;");
@@ -68,4 +68,40 @@ test("fmtRemaining picks the coarsest unit that still fits: s, m, h, d", () => {
 
 test("fmtRemaining clamps a past deadline to 0 instead of a negative number", () => {
   assert.equal(fmtRemaining(-5000), "0s");
+});
+
+test("normalizeFile rejects missing or non-object attachments", () => {
+  assert.equal(normalizeFile(undefined), undefined);
+  assert.equal(normalizeFile(null), undefined);
+  assert.equal(normalizeFile("nope"), undefined);
+  assert.equal(normalizeFile(42), undefined);
+});
+
+test("normalizeFile fills in defaults for missing fields", () => {
+  assert.deepEqual(normalizeFile({}), {
+    name: "file",
+    mime: "application/octet-stream",
+    size: 0,
+    id: "",
+    key: "",
+    enc: "",
+  });
+});
+
+test("normalizeFile truncates an oversized name and mime instead of storing them whole", () => {
+  const out = normalizeFile({ name: "a".repeat(500), mime: "b".repeat(500) });
+  assert.equal(out.name.length, 120);
+  assert.equal(out.mime.length, 100);
+});
+
+test("normalizeFile coerces a bogus size to 0 instead of NaN", () => {
+  assert.equal(normalizeFile({ size: "not a number" }).size, 0);
+  assert.equal(normalizeFile({ size: 2048 }).size, 2048);
+});
+
+test("normalizeFile only keeps expireAt when it is a finite number", () => {
+  assert.equal("expireAt" in normalizeFile({}), false);
+  assert.equal("expireAt" in normalizeFile({ expireAt: "soon" }), false);
+  assert.equal(normalizeFile({ expireAt: 1735689600000 }).expireAt, 1735689600000);
+  assert.equal(normalizeFile({ expireAt: "1735689600000" }).expireAt, 1735689600000);
 });

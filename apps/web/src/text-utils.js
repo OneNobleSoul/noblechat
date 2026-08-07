@@ -44,3 +44,22 @@ export function fmtRemaining(ms) {
   if (s < 86400) return Math.round(s / 3600) + "h";
   return Math.round(s / 86400) + "d";
 }
+
+// A received message's `file` object is attacker-controlled: coerce every field
+// to the exact type/shape the UI expects before it is ever stored or rendered,
+// so a crafted value can't break out of an HTML attribute or class. Decryption
+// fields (id/key/mime/enc) are kept as plain strings; they only feed
+// encodeURIComponent/fromB64, never raw HTML.
+export function normalizeFile(f) {
+  if (!f || typeof f !== "object") return undefined;
+  const out = {
+    name: String(f.name || "file").slice(0, 120),
+    mime: String(f.mime || "application/octet-stream").slice(0, 100),
+    size: Number(f.size) || 0,
+    id: String(f.id || ""),
+    key: String(f.key || ""),
+    enc: String(f.enc || ""),
+  };
+  if (f.expireAt != null && Number.isFinite(Number(f.expireAt))) out.expireAt = Number(f.expireAt);
+  return out;
+}
