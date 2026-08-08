@@ -21,7 +21,7 @@ import { createLog } from "./log.js";
 import { isTransport } from "./transport.js";
 import { connectNym } from "./nym.js";
 import { turnIceServers } from "./turn.js";
-import { HANDLE_RE, HEX_RE, isB64, validCard, readBody, streamToFile, json, timingEqual, originAllowed, hashPassword, verifyPassword, clampExpireSec } from "./util.js";
+import { HANDLE_RE, HEX_RE, isB64, validCard, readBody, streamToFile, json, timingEqual, originAllowed, hashPassword, verifyPassword, clampExpireSec, tryAcquireConn, releaseConn } from "./util.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.resolve(__dirname, "../web/public");
@@ -528,8 +528,7 @@ async function main() {
     // so a malicious page can't open a gateway socket in a visitor's browser.
     if (!originAllowed(req.headers.origin, req.headers.host, CFG.allowedOrigins)) { ws.close(4008, "forbidden origin"); return; }
     const ip = clientIp(req);
-    const n = (connPerIp.get(ip) || 0) + 1; connPerIp.set(ip, n);
-    if (n > CFG.maxConnPerIp) { ws.close(1013, "too many connections"); return; }
+    if (!tryAcquireConn(connPerIp, ip, CFG.maxConnPerIp)) { ws.close(1013, "too many connections"); return; }
     sockets.add(ws);
     let unsub = null; let myMbkey = null;
     try { ws.send(JSON.stringify({ t: "status", ...statusObj() })); } catch { /* */ }
@@ -574,7 +573,7 @@ async function main() {
       sockets.delete(ws);
       if (unsub) unsub();
       if (myMbkey) { const set = mbkeySockets.get(myMbkey); if (set) { set.delete(ws); if (!set.size) mbkeySockets.delete(myMbkey); } }
-      const left = (connPerIp.get(ip) || 1) - 1; if (left <= 0) connPerIp.delete(ip); else connPerIp.set(ip, left);
+      releaseConn(connPerIp, ip);
     });
     ws.on("error", () => { /* */ });
   });
