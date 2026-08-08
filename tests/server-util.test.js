@@ -5,6 +5,7 @@ import {
   HANDLE_RE, HEX_RE, isB64, validCard,
   readBody, readBodyBuffer, timingEqual, originAllowed,
   hashPassword, verifyPassword, clampExpireSec,
+  tryAcquireConn, releaseConn,
 } from "../apps/server/util.js";
 
 test("handle format matches what the account routes accept", () => {
@@ -183,6 +184,45 @@ test("streamToFile rejects past the limit and removes the partial file", async (
   // but not for a disk error or aborted stream
   await assert.rejects(pending, (e) => e.code === "E_TOO_LARGE" && /body too large/.test(e.message));
   assert.equal(fs.existsSync(dest), false);
+});
+
+test("tryAcquireConn allows up to max and rejects past it", () => {
+  const m = new Map();
+  assert.ok(tryAcquireConn(m, "1.2.3.4", 2));
+  assert.ok(tryAcquireConn(m, "1.2.3.4", 2));
+  assert.equal(m.get("1.2.3.4"), 2);
+  assert.ok(!tryAcquireConn(m, "1.2.3.4", 2));
+  // a rejected attempt must not bump the stored count, or the IP would
+  // creep further past the limit on every retry and never recover
+  assert.equal(m.get("1.2.3.4"), 2);
+});
+
+test("tryAcquireConn: a rejected attempt does not need releaseConn, and does not affect other IPs", () => {
+  const m = new Map();
+  tryAcquireConn(m, "1.1.1.1", 1);
+  assert.ok(!tryAcquireConn(m, "1.1.1.1", 1));
+  assert.ok(tryAcquireConn(m, "2.2.2.2", 1));
+  assert.equal(m.get("1.1.1.1"), 1);
+  assert.equal(m.get("2.2.2.2"), 1);
+});
+
+test("releaseConn removes the entry once it hits zero, instead of leaving a stale 0", () => {
+  const m = new Map();
+  tryAcquireConn(m, "1.2.3.4", 5);
+  releaseConn(m, "1.2.3.4");
+  assert.equal(m.has("1.2.3.4"), false);
+});
+
+test("acquire/reject/release cycle: an IP can reconnect once a slot actually frees up", () => {
+  const m = new Map();
+  tryAcquireConn(m, "1.2.3.4", 1);
+  // a second attempt while the first connection is still open is rejected
+  assert.ok(!tryAcquireConn(m, "1.2.3.4", 1));
+  // this is the bug this fix closes: the rejected attempt above must not have
+  // been counted, otherwise closing the one real connection still leaves the
+  // IP permanently over the limit
+  releaseConn(m, "1.2.3.4");
+  assert.ok(tryAcquireConn(m, "1.2.3.4", 1));
 });
 
 test("gateway origin check accepts same-origin and blocks cross-origin browsers", () => {

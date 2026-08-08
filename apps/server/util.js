@@ -102,6 +102,24 @@ export async function verifyPassword(pw, stored) {
   return got.length === want.length && crypto.timingSafeEqual(got, want);
 }
 
+// Per-IP WebSocket connection accounting for the gateway's connection cap.
+// A slot is only counted once a connection is actually accepted; releaseConn
+// undoes exactly that accounting when it later closes. Counting a rejected
+// attempt (over the limit) and never releasing it would let the map entry for
+// that IP only ever grow, since a socket that never opened also never fires
+// a close event to release it, permanently locking that IP out.
+export function tryAcquireConn(map, ip, max) {
+  const n = (map.get(ip) || 0) + 1;
+  if (n > max) return false;
+  map.set(ip, n);
+  return true;
+}
+
+export function releaseConn(map, ip) {
+  const left = (map.get(ip) || 1) - 1;
+  if (left <= 0) map.delete(ip); else map.set(ip, left);
+}
+
 // How long an uploaded attachment's ciphertext should live, in seconds. The
 // client sends this as the x-expire-sec header; 0/absent means "keep for the
 // usual mailbox TTL", negative and non-numeric values fall back to that same
