@@ -5,7 +5,7 @@ import {
   HANDLE_RE, HEX_RE, isB64, validCard,
   readBody, readBodyBuffer, timingEqual, originAllowed,
   hashPassword, verifyPassword, clampExpireSec,
-  tryAcquireConn, releaseConn,
+  tryAcquireConn, releaseConn, staticRelPath,
 } from "../apps/server/util.js";
 
 test("handle format matches what the account routes accept", () => {
@@ -236,4 +236,32 @@ test("gateway origin check accepts same-origin and blocks cross-origin browsers"
   assert.ok(originAllowed("https://app.example.com", "gw.example.com", ["https://app.example.com"]));
   // a malformed Origin is rejected rather than trusted
   assert.ok(!originAllowed("not a url", "chat.example.com", []));
+});
+
+test("static routing: the landing page is at / and the chat client at /app", () => {
+  assert.equal(staticRelPath("/"), "/index.html");
+  assert.equal(staticRelPath("/app"), "/app.html");
+  // browsers append a slash when someone types the bare path
+  assert.equal(staticRelPath("/app/"), "/app.html");
+  // the query string never reaches the filesystem
+  assert.equal(staticRelPath("/app?v=abc"), "/app.html");
+  assert.equal(staticRelPath("/?utm=x"), "/index.html");
+});
+
+test("static routing: everything else maps one to one", () => {
+  assert.equal(staticRelPath("/info.html"), "/info.html");
+  assert.equal(staticRelPath("/style.css?v=deadbeef"), "/style.css");
+  assert.equal(staticRelPath("/icons/icon-192.png"), "/icons/icon-192.png");
+  // /app is an exact route, not a prefix: it must not swallow real files
+  assert.equal(staticRelPath("/app.bundle.js"), "/app.bundle.js");
+  assert.equal(staticRelPath("/apple-touch-icon.png"), "/apple-touch-icon.png");
+});
+
+test("static routing: traversal attempts are passed through for the caller to reject", () => {
+  // staticRelPath only maps URLs; containment is enforced against PUBLIC in
+  // serveStatic, so the raw path must survive unchanged rather than be
+  // silently cleaned up here
+  assert.equal(staticRelPath("/../../etc/passwd"), "/../../etc/passwd");
+  assert.equal(staticRelPath(""), "/index.html");
+  assert.equal(staticRelPath(undefined), "/index.html");
 });

@@ -21,7 +21,7 @@ import { createLog } from "./log.js";
 import { isTransport } from "./transport.js";
 import { connectNym } from "./nym.js";
 import { turnIceServers } from "./turn.js";
-import { HANDLE_RE, HEX_RE, isB64, validCard, readBody, streamToFile, json, timingEqual, originAllowed, hashPassword, verifyPassword, clampExpireSec, tryAcquireConn, releaseConn } from "./util.js";
+import { HANDLE_RE, HEX_RE, isB64, validCard, readBody, streamToFile, json, timingEqual, originAllowed, hashPassword, verifyPassword, clampExpireSec, tryAcquireConn, releaseConn, staticRelPath } from "./util.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.resolve(__dirname, "../web/public");
@@ -208,11 +208,13 @@ async function main() {
   function sessionToken(req) { const m = /^Bearer (.+)$/.exec(req.headers["authorization"] || ""); return m && m[1]; }
 
   function serveStatic(req, res) {
-    let rel = req.url.split("?")[0]; if (rel === "/") rel = "/index.html";
+    const rel = staticRelPath(req.url);
     const file = path.join(PUBLIC, path.normalize(rel).replace(/^(\.\.[/\\])+/, ""));
     if (!file.startsWith(PUBLIC)) { res.writeHead(403).end(); return; }
     const base = path.basename(file);
-    const isHtml = file.endsWith("index.html");
+    // Every page, not just index.html: the landing page and the chat client are
+    // separate documents now, and info/admin want the same freshness rules.
+    const isHtml = path.extname(file) === ".html";
     // The HTML and the service-worker scripts must always revalidate so an
     // update actually reaches clients; hash-versioned assets stay cacheable.
     const noCache = isHtml || base === "sw.js" || base === "register-sw.js";
