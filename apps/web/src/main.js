@@ -239,10 +239,15 @@ async function doAuth() {
     // Accounts created before the split still have a hash over the raw
     // password, so the server can't check an auth secret against them yet. It
     // asks for one retry with the password, verifies that, and stores the auth
-    // secret from then on - a silent one-time upgrade, no password reset.
-    // The retry flag comes back on every failed sign-in, including for handles
-    // that don't exist, so it can't be used to tell which accounts are old.
-    if (!r.ok && j.retryLegacy) {
+    // secret from then on - a one-time upgrade, no password reset.
+    //
+    // This is the only path on which a password still leaves the device, so it
+    // is fenced in: sign-in only (a registration never needs it), once per
+    // attempt, and never repeated. The server for its part only offers it to
+    // an account that genuinely still has an old-style hash. It remains a
+    // server-driven fallback, which is why it is on a deadline rather than
+    // permanent - see LEGACY_AUTH_UNTIL.
+    if (!r.ok && j.retryLegacy && state.authMode === "login") {
       r = await post({ username: user, password: pass, authSecret });
       j = await r.json().catch(() => ({}));
     }
