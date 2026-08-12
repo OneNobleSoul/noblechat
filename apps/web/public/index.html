@@ -1,7 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="locked">
 <head>
 <meta charset="utf-8">
+<!-- Loaded here, blocking and not deferred, so an already-unlocked tab drops the
+     curtain before first paint. The CSP has no 'unsafe-inline', so this cannot
+     be an inline snippet. -->
+<script src="/landing-gate.js?v=__V__"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NobleChat - private messaging over a real mix network</title>
 <meta name="description" content="End-to-end encrypted messaging with hybrid post-quantum keys, routed through a Sphinx style mix network. The server never sees your messages and cannot tell them apart from cover traffic.">
@@ -97,6 +101,65 @@ h2{font-size:24px;margin:0 0 6px;letter-spacing:-.3px}
 pre{background:#080b11;border:1px solid var(--line);border-radius:12px;padding:16px 18px;overflow-x:auto;font-family:var(--mono);font-size:13px;color:var(--text);margin:0}
 pre .c{color:var(--dim)}
 
+/* coming-soon curtain */
+html.locked{overflow:hidden}
+html.locked body>*:not(#soon){visibility:hidden}
+.soon{position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;padding:24px;
+  background:var(--bg);transition:opacity .4s ease}
+.soon::before{content:"";position:absolute;inset:0;opacity:.16;
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:48px 48px;mask-image:radial-gradient(circle at 50% 20%,#000,transparent 72%)}
+.soon::after{content:"";position:absolute;left:50%;top:-160px;width:620px;height:620px;transform:translateX(-50%);
+  background:radial-gradient(circle,color-mix(in srgb,var(--accent) 13%,transparent),transparent 62%);pointer-events:none}
+.soon.gone{opacity:0;pointer-events:none}
+html:not(.locked) .soon{display:none}
+.soon-inner{position:relative;width:min(560px,100%);text-align:center}
+.soon-mark{font-size:44px;color:var(--accent);line-height:1;margin-bottom:20px;
+  filter:drop-shadow(0 0 26px color-mix(in srgb,var(--accent) 45%,transparent))}
+.soon-chip{display:inline-flex;align-items:center;gap:9px;font-family:var(--mono);font-size:11.5px;
+  text-transform:uppercase;letter-spacing:2px;color:var(--accent);background:color-mix(in srgb,var(--accent) 9%,transparent);
+  border:1px solid color-mix(in srgb,var(--accent) 26%,var(--line));border-radius:999px;padding:7px 16px}
+.soon-chip .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);animation:nc-pulse 2.1s ease-in-out infinite}
+@keyframes nc-pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 55%,transparent)}
+  50%{opacity:.55;box-shadow:0 0 0 7px transparent}}
+.soon h1{font-size:clamp(34px,7vw,52px);line-height:1.08;letter-spacing:-1.2px;margin:22px 0 0}
+.soon h1 span{color:var(--accent)}
+.soon .lede{color:var(--muted);font-size:16.5px;margin:16px auto 0;max-width:430px}
+.soon-flow{display:flex;align-items:center;justify-content:center;gap:9px;margin:34px 0 30px}
+.soon-flow i{width:9px;height:9px;border-radius:50%;background:var(--line);animation:nc-hop 2.4s ease-in-out infinite}
+.soon-flow i:nth-child(2){animation-delay:.2s}
+.soon-flow i:nth-child(3){animation-delay:.4s}
+.soon-flow i:nth-child(4){animation-delay:.6s}
+.soon-flow i:nth-child(5){animation-delay:.8s}
+.soon-flow i:nth-child(6){animation-delay:1s}
+.soon-flow i:nth-child(7){animation-delay:1.2s}
+@keyframes nc-hop{0%,72%,100%{background:var(--line);transform:scale(1)}
+  36%{background:var(--accent);transform:scale(1.45);box-shadow:0 0 16px color-mix(in srgb,var(--accent) 60%,transparent)}}
+.soon-meta{display:flex;flex-wrap:wrap;gap:7px;justify-content:center;margin-bottom:34px}
+.soon-meta span{font-family:var(--mono);font-size:11px;color:var(--dim);border:1px solid var(--line);
+  border-radius:999px;padding:5px 11px}
+.soon-link{background:none;border:0;font-family:var(--mono);font-size:12.5px;color:var(--dim);cursor:pointer;
+  padding:8px;text-decoration:underline;text-underline-offset:4px}
+.soon-link:hover{color:var(--accent)}
+.soon-form{width:min(340px,100%);margin:0 auto;text-align:left}
+.soon-form label{display:block;font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:1.5px;
+  color:var(--dim);margin-bottom:8px}
+.soon-row{display:flex;gap:8px}
+.soon-row input{flex:1;min-width:0;background:#080b11;border:1px solid var(--line);border-radius:10px;color:var(--text);
+  font-size:16px;padding:12px;font-family:var(--mono)}
+.soon-row input:focus{outline:none;border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.soon-row button{border:0;border-radius:10px;padding:12px 18px;font-weight:700;font-family:var(--mono);font-size:13px;
+  color:#04120f;background:linear-gradient(180deg,var(--accent),#2dd4bf);cursor:pointer}
+.soon-row button:disabled{opacity:.6;cursor:default}
+.soon-err{color:#fda4af;font-family:var(--mono);font-size:12px;margin:10px 0 0}
+.soon.shake .soon-inner{animation:nc-shake .38s}
+@keyframes nc-shake{10%,90%{transform:translateX(-2px)}30%,70%{transform:translateX(5px)}50%{transform:translateX(-7px)}}
+@media (prefers-reduced-motion:reduce){
+  .soon-chip .dot,.soon-flow i{animation:none}
+  .soon-flow i:nth-child(4){background:var(--accent)}
+  .soon.shake .soon-inner{animation:none}
+}
+
 /* footer */
 footer{margin-top:70px;border-top:1px solid var(--line);padding:26px 0 44px;display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center}
 footer a{font-family:var(--mono);font-size:12.5px;color:var(--muted);text-decoration:none}
@@ -105,6 +168,30 @@ footer .sp{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--d
 </style>
 </head>
 <body>
+<div id="soon" class="soon">
+  <div class="soon-inner">
+    <div class="soon-mark" aria-hidden="true">◆</div>
+    <div class="soon-chip"><span class="dot" aria-hidden="true"></span>Coming soon</div>
+    <h1>Noble<span>Chat</span></h1>
+    <p class="lede">Private messaging over a real mix network. Hybrid post-quantum keys, Sphinx routing, and a server that never sees your messages. We are still testing.</p>
+    <div class="soon-flow" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="soon-meta">
+      <span>X25519 + ML-KEM-768</span>
+      <span>Ed25519 + ML-DSA-65</span>
+      <span>AGPL-3.0</span>
+    </div>
+    <button id="soon-reveal" class="soon-link" type="button">Have an access key?</button>
+    <div id="soon-form" class="soon-form" hidden>
+      <label for="soon-input">Access key</label>
+      <div class="soon-row">
+        <input id="soon-input" type="password" placeholder="key" autocomplete="off" spellcheck="false">
+        <button id="soon-go" type="button">Enter</button>
+      </div>
+      <p id="soon-err" class="soon-err" hidden>That key does not match.</p>
+    </div>
+  </div>
+</div>
+
 <div class="bg-grid" aria-hidden="true"></div>
 
 <div class="wrap">

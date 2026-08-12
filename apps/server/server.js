@@ -71,7 +71,7 @@ function computeVersion() {
   // because the ?v= query never moved).
   try {
     const h = crypto.createHash("sha256");
-    for (const f of ["app.bundle.js", "style.css"]) {
+    for (const f of ["app.bundle.js", "style.css", "landing-gate.js"]) {
       try { h.update(fs.readFileSync(path.join(PUBLIC, f))); } catch { /* */ }
     }
     return h.digest("hex").slice(0, 12);

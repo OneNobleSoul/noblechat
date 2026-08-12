@@ -12,12 +12,11 @@ import { toB64, fromB64, poissonDelay, keysFingerprint } from "../../../packages
 import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining, normalizeFile } from "./text-utils.js";
 import { parsePinsJson, pinsToObject, mergeSyncedPin } from "./pin-utils.js";
 import { reactionsAfterToggle, canUnsend, trimHistory, shouldStickToBottom } from "./message-utils.js";
+import { unlocks, isUnlocked, markUnlocked } from "./gate.js";
 
 const $ = (s) => document.querySelector(s);
 const K = { token: "noblechat:token", user: "noblechat:user", dev: "noblechat:deviceId", id: "noblechat:id", bkey: "noblechat:bkey", contacts: "noblechat:contacts", prefs: "noblechat:prefs", history: "noblechat:history", pins: "noblechat:pins" };
 const HISTORY_PER_CHAT = 300; // cap stored messages per conversation
-const GATE_HASH = "b34f7fb73eea21931199bcd983951029b3df3ef407a7e58d617cf03747014f1a";
-const GATE_OK = "noblechat:gate-ok";
 
 const state = {
   ws: null, net: null, meanDelayMs: 60,
@@ -46,8 +45,6 @@ function markSeen(id) {
   }
 }
 function toast(msg) { const t = $("#toast"); t.hidden = false; t.textContent = msg; requestAnimationFrame(() => t.classList.add("show")); clearTimeout(toast._t); toast._t = setTimeout(() => { t.classList.remove("show"); setTimeout(() => (t.hidden = true), 250); }, 2600); }
-
-async function sha256Hex(str) { const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str)); return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join(""); }
 
 // ---- preferences (sound, per-chat mutes, blocks) ----
 // Persisted locally for this device and, for mutes/blocks, mirrored into the
@@ -118,14 +115,14 @@ async function boot() { await passGate(); await init(); }
 function passGate() {
   return new Promise((resolve) => {
     const g = $("#gate");
-    if (sessionStorage.getItem(GATE_OK) === "1") { g.hidden = true; resolve(); return; }
+    if (isUnlocked()) { g.hidden = true; resolve(); return; }
     g.hidden = false;
     const input = $("#gate-input"), btn = $("#gate-go"), err = $("#gate-err");
     input.focus();
     async function tryUnlock() {
       const v = input.value; if (!v) return; btn.disabled = true;
-      let ok = false; try { ok = (await sha256Hex(v)) === GATE_HASH; } catch { ok = false; }
-      if (ok) { try { sessionStorage.setItem(GATE_OK, "1"); } catch { /* */ } g.classList.add("gone"); setTimeout(() => { g.hidden = true; resolve(); }, 340); }
+      const ok = await unlocks(v);
+      if (ok) { markUnlocked(); g.classList.add("gone"); setTimeout(() => { g.hidden = true; resolve(); }, 340); }
       else { err.hidden = false; input.value = ""; input.focus(); g.classList.remove("shake"); void g.offsetWidth; g.classList.add("shake"); btn.disabled = false; }
     }
     btn.addEventListener("click", tryUnlock);
