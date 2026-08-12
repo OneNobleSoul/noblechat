@@ -45,10 +45,26 @@ export function validCard(c) {
     c.sign && isB64(c.sign.ed) && isB64(c.sign.dsa);
 }
 
+// Read a JSON-sized request body, refusing anything over the limit.
+//
+// The overflow case used to call req.destroy(), which drops the connection
+// mid-request: the caller never gets a status, and a reverse proxy in front
+// turns that into a bare 502. An oversized body is the client's mistake and
+// deserves to be told so, hence the tagged error the routes turn into 413.
+//
+// An honest Content-Length is rejected before a single byte is buffered; the
+// running count still guards chunked bodies that declare nothing (or lie).
 export function readBody(req, maxBytes) {
   return new Promise((resolve, reject) => {
+    const tooLarge = () => Object.assign(new Error("body too large"), { code: "E_TOO_LARGE" });
+    const declared = Number((req.headers || {})["content-length"]);
+    if (Number.isFinite(declared) && declared > maxBytes) { reject(tooLarge()); return; }
     let size = 0; const chunks = [];
-    req.on("data", (c) => { size += c.length; if (size > maxBytes) { req.destroy(); reject(new Error("body too large")); return; } chunks.push(c); });
+    req.on("data", (c) => {
+      size += c.length;
+      if (size > maxBytes) { chunks.length = 0; reject(tooLarge()); return; }
+      chunks.push(c);
+    });
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });

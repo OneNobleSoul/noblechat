@@ -51,6 +51,16 @@ services:
       # which is the one your proxy appended. Set 0 if you expose the port
       # directly, or 2 if a CDN sits in front of your proxy.
       TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-1}
+      # Closes the one-time upgrade path for accounts created before the
+      # auth/blob split. Until this date a sign-in for such an account may
+      # send the password once so it can be re-stored as an auth secret; that
+      # is the only remaining way a password reaches this server, so it is not
+      # left open forever. Afterwards those accounts need a password reset.
+      LEGACY_AUTH_UNTIL: ${LEGACY_AUTH_UNTIL:-}
+      # Overrides the connect-src origins allowed when the nym transport is on.
+      # Defaults to the nym validator plus wss:; set it if you point the client
+      # at a different validator or want a pinned gateway set.
+      NYM_CONNECT_SRC: ${NYM_CONNECT_SRC:-}
     volumes:
       - noblechat-files:/app/data/files
     # Published on loopback only: put your own reverse proxy (Caddy, nginx)

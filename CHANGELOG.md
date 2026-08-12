@@ -88,6 +88,32 @@ Findings from an external penetration test of chat.noblesoul.tech, August 2026.
   to decrypt its own contacts.
 - Added `/.well-known/security.txt`.
 
+Follow-ups from the retest of the same day, against build `4c2566215178`:
+
+- The upgrade path for pre-split accounts was a downgrade switch. The server
+  answered every failed sign-in with `retryLegacy`, including for handles that
+  do not exist, and the client responds to that by sending the password. That
+  was meant to avoid an "this account is old" oracle, but it handed a malicious
+  or compromised server exactly the capability the split was supposed to
+  remove: answer everything with the flag, collect plaintext passwords,
+  recompute blob keys. The flag is now only set for an account that genuinely
+  still has an old-style hash, the client only follows it on sign-in, and the
+  whole path expires via `LEGACY_AUTH_UNTIL`.
+- `connect-src` no longer needs `https:` even with nym. Measuring a real
+  session showed the only https origin the client reaches is the nym validator;
+  everything else is websockets to gateways picked from the topology. https is
+  pinned to the validator, wss stays broad. Verified by rehearsing the tighter
+  policy against production before shipping it: nym still connected, nothing
+  refused.
+- The shared per-address auth budget was 30 attempts a minute sustained, which
+  is generous for credential stuffing spread thinly across many handles (the
+  per-handle backoff only ever sees one attempt per account). Now 12 to burst,
+  then about 9 a minute.
+- An oversized request body was refused by dropping the connection, which the
+  reverse proxy turned into a bare 502. `readBody` now rejects an over-limit
+  `Content-Length` before buffering anything and tags the error, so routes
+  answer a plain 413.
+
 Two findings needed no change. The device limit the report could not confirm
 from outside does exist (`MAX_DEVICES_PER_ACCOUNT`, default 10). The
 coming-soon gate on the landing page is client-side by design and its own text
