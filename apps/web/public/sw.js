@@ -4,7 +4,7 @@
 // and the /gateway WebSocket are never touched.
 // The chat client lives at /app; "/" is the public landing page. Only the app
 // shell is precached, since that is the part that has to survive going offline.
-const CACHE = "noblechat-v5";
+const CACHE = "noblechat-v6";
 const APP_URLS = ["/app", "/app.html"];
 const SHELL = APP_URLS;
 
