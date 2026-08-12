@@ -358,15 +358,34 @@ function authFetch(url, opts = {}) {
 async function fetchBundleFor(handle) {
   return authFetch("/api/bundle?handle=" + encodeURIComponent(handle));
 }
+// Take the cards out of a bundle response, dropping any that are not actually
+// for the handle we asked about.
+//
+// The client used to trust the bundle wholesale. A server bug let one account
+// overwrite another's device row, so a lookup for someone could hand back a
+// card belonging to an attacker, and we would happily encrypt to it. That hole
+// is closed server-side, but the check belongs here too: it costs nothing, and
+// the whole point of end-to-end encryption is not having to take the server's
+// word for whose keys these are. Pinning only catches this on a second look;
+// a first contact would have been compromised silently.
+function cardsForHandle(json, handle) {
+  const want = String(handle).toLowerCase();
+  const all = (json && json.devices) || [];
+  const mine = all.filter((c) => c && String(c.handle || "").toLowerCase() === want);
+  if (mine.length !== all.length) toast(`ignored a key card that wasn't ${want}'s`);
+  return mine.map(deserializeCard);
+}
 async function loadMyBundle() {
-  try { const r = await fetchBundleFor(state.user); if (r.ok) { const j = await r.json(); state.myBundle = (j.devices || []).map(deserializeCard); } } catch { /* */ }
+  try { const r = await fetchBundleFor(state.user); if (r.ok) { state.myBundle = cardsForHandle(await r.json(), state.user); } } catch { /* */ }
 }
 function loadContactsLocal() {
   try {
     const raw = JSON.parse(ls.get(K.contacts) || "[]");
     // legacy format was a bare array of {handle,cards}; new one wraps groups too
     const arr = Array.isArray(raw) ? raw : (raw.contacts || []);
-    for (const entry of arr) { const cards = entry.cards.map(deserializeCard); checkPin(entry.handle, cards); state.contacts.set(entry.handle, cards); }
+    // Filtered on the way back in as well: a contact list written by an older
+    // build may hold a card that was never checked against its handle.
+    for (const entry of arr) { const cards = cardsForHandle({ devices: entry.cards }, entry.handle); checkPin(entry.handle, cards); state.contacts.set(entry.handle, cards); }
     if (!Array.isArray(raw)) for (const g of (raw.groups || [])) if (g && g.id) state.groups.set(g.id, g);
   } catch { /* */ }
 }
@@ -530,7 +549,8 @@ async function fetchBundle(handle, { silent = true, noSave = false } = {}) {
     const r = await fetchBundleFor(handle);
     if (!r.ok) { if (!silent) toast("no such handle online"); return false; }
     const j = await r.json();
-    const cards = (j.devices || []).map(deserializeCard);
+    const cards = cardsForHandle(j, handle);
+    if (!cards.length) { if (!silent) toast("no usable key card for that handle"); return false; }
     checkPin(handle, cards);
     state.contacts.set(handle, cards);
     saveContactsLocal(); if (!noSave) uploadContactsBlob();
@@ -598,7 +618,7 @@ async function verifySender(handle, verify) {
     // as a contact as a side effect of the lookup
     try {
       const r = await fetchBundleFor(handle);
-      if (r.ok) { const j = await r.json(); const cards = (j.devices || []).map(deserializeCard); checkPin(handle, cards); state.contacts.set(handle, cards); }
+      if (r.ok) { const cards = cardsForHandle(await r.json(), handle); if (cards.length) { checkPin(handle, cards); state.contacts.set(handle, cards); } }
     } catch { /* offline: fall through, check() decides */ }
   }
   return check();

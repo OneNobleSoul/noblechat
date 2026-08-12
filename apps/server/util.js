@@ -8,8 +8,12 @@ import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 export const HANDLE_RE = /^[a-z0-9_]{3,24}$/;
-export const B64_RE = /^[A-Za-z0-9+/=]{1,4096}$/;
-export const HEX_RE = /^[a-f0-9]{8,64}$/;
+const B64_RE = /^[A-Za-z0-9+/=]{1,4096}$/;
+// Device ids specifically: the client generates 16 random bytes, so accept
+// exactly that. A looser rule would have taken 8 hex characters -
+// 32 bits - which is guessable, and a device id decides which row a device
+// registration lands on.
+export const DEVICE_ID_RE = /^[a-f0-9]{32}$/;
 // What clients send instead of a password: 256 bits, lowercase hex, derived
 // browser-side under the auth salt. Fixed length, so it is checked exactly
 // rather than coerced.
@@ -70,15 +74,6 @@ export function readBody(req, maxBytes) {
   });
 }
 
-export function readBodyBuffer(req, maxBytes) {
-  return new Promise((resolve, reject) => {
-    let size = 0; const chunks = [];
-    req.on("data", (c) => { size += c.length; if (size > maxBytes) { req.destroy(); reject(new Error("body too large")); return; } chunks.push(c); });
-    req.on("end", () => resolve(Buffer.concat(chunks)));
-    req.on("error", reject);
-  });
-}
-
 // Stream a request body straight to a file, enforcing the size limit as the
 // bytes arrive. Nothing is buffered in memory, so a 500 MB upload costs a few
 // chunk-sized buffers instead of half a gigabyte of process RAM. Returns the
@@ -125,8 +120,24 @@ export function originAllowed(originHeader, hostHeader, allowedOrigins = []) {
 // blocked the whole event loop for the duration of the KDF, which froze every
 // websocket and all message routing while someone logged in (or hammered the
 // login endpoint on purpose).
+// Cost pinned explicitly rather than left to Node's defaults, which are not
+// covered by any compatibility promise: if a future release changed them,
+// every stored hash would stop matching and every account would be locked out
+// with no obvious cause. These ARE the current defaults, deliberately - the
+// point is to stop them moving on their own, not to change them now. Raising
+// the cost would invalidate existing hashes just the same, so it needs a
+// versioned hash format first.
+//
+// The cost is low compared to what you would pick for a password, and that is
+// the right call here: what gets hashed is not a password. It is the auth
+// secret, already the output of 600k PBKDF2 iterations in the browser and
+// effectively full entropy, so there is no dictionary to grind through. The
+// expensive derivation sits on the client where it protects the actual
+// password; this hash only stops a leaked database row from being replayed at
+// the login endpoint.
+const SCRYPT = { N: 16384, r: 8, p: 1 };
 const scrypt = (pw, salt, keylen) =>
-  new Promise((resolve, reject) => crypto.scrypt(pw, salt, keylen, (err, key) => (err ? reject(err) : resolve(key))));
+  new Promise((resolve, reject) => crypto.scrypt(pw, salt, keylen, SCRYPT, (err, key) => (err ? reject(err) : resolve(key))));
 
 export async function hashPassword(pw) {
   const salt = crypto.randomBytes(16);

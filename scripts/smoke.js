@@ -41,7 +41,7 @@ async function makeClient(handle) {
   // Registration sends the derived auth secret, never the password itself.
   const authSecret = await deriveAuthSecret("smoke-" + run + "-pass", handle);
   const { token } = await api("/api/account/register", { username: handle, authSecret });
-  await api("/api/account/device", { token, deviceId: crypto.randomBytes(8).toString("hex"), card: serializeCard(id.card) });
+  await api("/api/account/device", { token, deviceId: crypto.randomBytes(16).toString("hex"), card: serializeCard(id.card) });
 
   const ws = new WebSocket(`${WS_BASE}/gateway`);
   const waiters = [];
