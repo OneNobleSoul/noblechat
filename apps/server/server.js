@@ -207,6 +207,9 @@ async function main() {
     return true;
   };
   const submitLimit = rateLimiter({ capacity: 120, refillPerSec: 40 });
+  // Handle lookups, budgeted per account rather than per address: adding
+  // contacts is bursty but nobody legitimately walks thousands of handles.
+  const lookupLimit = rateLimiter({ capacity: 60, refillPerSec: 0.5 });
 
   // Admin access is granted two ways: the shared ADMIN_TOKEN (bootstrap / owner)
   // or a session token belonging to an account flagged is_admin. The latter lets
@@ -344,12 +347,24 @@ async function main() {
           return json(res, 200, { ok: true, removed: mbk.length });
         } catch (e) { return json(res, 400, { error: "bad request" }); }
       }
+      // Public key material for a handle. Signed-in callers only: unauthenticated
+      // this was a user directory. It answers 200-with-bundle for a handle that
+      // exists and 404 for one that doesn't, and the bundle carries the mailbox
+      // id, the provider id and the device count. Anyone could therefore walk
+      // the handle namespace to map the user base, link mailbox ids (which are
+      // meant to be unlinkable to an observer) back to handles, and watch a
+      // given account's device count change over time.
       if (url.pathname === "/api/bundle") {
         if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" });
+        const me = await sessionUser(sessionToken(req));
+        if (!me) return json(res, 401, { error: "not signed in" });
+        // Per-account budget on top of the per-IP one, so a single signed-in
+        // account still can't enumerate the namespace wholesale.
+        if (!lookupLimit(me)) return json(res, 429, { error: "too many lookups" });
         const handle = (url.searchParams.get("handle") || "").toLowerCase();
-        if (!HANDLE_RE.test(handle)) { res.writeHead(400).end("{}"); return; }
+        if (!HANDLE_RE.test(handle)) return json(res, 400, { error: "bad handle" });
         const devices = await store.deviceBundle(handle);
-        if (!devices.length) { res.writeHead(404).end("{}"); return; }
+        if (!devices.length) return json(res, 404, { error: "not found" });
         return json(res, 200, { handle, devices });
       }
       // Presence: a handle is "online" if any of its devices currently holds a
@@ -389,7 +404,13 @@ async function main() {
         const username = await sessionUser(sessionToken(req));
         if (!username) return json(res, 401, { error: "not signed in" });
         if (await store.isBanned(username)) return json(res, 403, { error: "account suspended" });
-        const mime = String(req.headers["x-file-type"] || "application/octet-stream").slice(0, 100);
+        // The media type is NOT taken from the client any more. It used to be
+        // stored verbatim from the x-file-type header, which meant the one
+        // readable thing about an otherwise opaque attachment ("this is a PDF",
+        // "this is a voice message") sat in the clear in our database. Nothing
+        // ever read it back: the client takes the media type from the encrypted
+        // message body, not from the download response.
+        const mime = "application/octet-stream";
         // Optional auto-delete: the client sends how many seconds the ciphertext
         // should live. Clamp to <= 30 days; 0/absent means keep for the usual TTL.
         const expSec = clampExpireSec(req.headers["x-expire-sec"], 30 * 24 * 3600);
@@ -410,13 +431,21 @@ async function main() {
         catch { await fs.promises.unlink(store.filePath(id)).catch(() => {}); return json(res, 500, { error: "store failed" }); }
         return json(res, 200, { id });
       }
+      // Attachment download. Signed-in callers only: the ciphertext is useless
+      // without the per-file key that travels inside the end-to-end message,
+      // but an id that leaks (a log line, a forwarded transcript, a scraped
+      // backup) otherwise granted permanent anonymous access to the exact
+      // ciphertext length, which fingerprints known files.
       if (url.pathname === "/api/file") {
         if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" });
+        if (!(await sessionUser(sessionToken(req)))) return json(res, 401, { error: "not signed in" });
         const id = String(url.searchParams.get("id") || "");
         if (!/^[a-f0-9]{36}$/.test(id)) { res.writeHead(400).end(); return; }
         const f = await store.getFile(id);
         if (!f) { res.writeHead(404).end(); return; }
-        const headers = { "content-type": "application/octet-stream", "x-file-type": f.mime, "Cache-Control": "private, max-age=86400" };
+        // No x-file-type here any more: see the upload route. The real media
+        // type rides inside the encrypted message and is what the client uses.
+        const headers = { "content-type": "application/octet-stream", "Cache-Control": "private, max-age=86400" };
         if (f.data) { res.writeHead(200, headers); res.end(f.data); return; } // legacy row: bytes still in the DB
         const rs = fs.createReadStream(store.filePath(id));
         rs.on("open", () => {

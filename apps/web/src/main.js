@@ -288,8 +288,17 @@ function updateChatHeadPresence() {
 }
 
 // ---------- account bundle + contacts ----------
+// Bundle and attachment routes require a session now (they used to be open,
+// which made the first one a public user directory). The token goes in the
+// Authorization header, never the URL, so it stays out of proxy logs.
+function authFetch(url, opts = {}) {
+  return fetch(url, { ...opts, headers: { ...(opts.headers || {}), Authorization: "Bearer " + state.token } });
+}
+async function fetchBundleFor(handle) {
+  return authFetch("/api/bundle?handle=" + encodeURIComponent(handle));
+}
 async function loadMyBundle() {
-  try { const r = await fetch("/api/bundle?handle=" + encodeURIComponent(state.user)); if (r.ok) { const j = await r.json(); state.myBundle = (j.devices || []).map(deserializeCard); } } catch { /* */ }
+  try { const r = await fetchBundleFor(state.user); if (r.ok) { const j = await r.json(); state.myBundle = (j.devices || []).map(deserializeCard); } } catch { /* */ }
 }
 function loadContactsLocal() {
   try {
@@ -457,7 +466,7 @@ async function fetchBundle(handle, { silent = true, noSave = false } = {}) {
   if (handle === state.user) { if (!silent) toast("that's you"); return false; }
   if (state.blocked.has(handle)) { if (!silent) toast(`${handle} is blocked - unblock them first`); return false; }
   try {
-    const r = await fetch("/api/bundle?handle=" + encodeURIComponent(handle));
+    const r = await fetchBundleFor(handle);
     if (!r.ok) { if (!silent) toast("no such handle online"); return false; }
     const j = await r.json();
     const cards = (j.devices || []).map(deserializeCard);
@@ -527,7 +536,7 @@ async function verifySender(handle, verify) {
     // deliberately not fetchBundle(): a spoofed sender must not end up saved
     // as a contact as a side effect of the lookup
     try {
-      const r = await fetch("/api/bundle?handle=" + encodeURIComponent(handle));
+      const r = await fetchBundleFor(handle);
       if (r.ok) { const j = await r.json(); const cards = (j.devices || []).map(deserializeCard); checkPin(handle, cards); state.contacts.set(handle, cards); }
     } catch { /* offline: fall through, check() decides */ }
   }
@@ -794,7 +803,11 @@ async function sendFile(file, expireSec = 0) {
     const keyRaw = crypto.getRandomValues(new Uint8Array(32));
     const enc = await encryptFileChunked(keyRaw, file);
     const mime = fileMime(file);
-    const headers = { "content-type": "application/octet-stream", "x-file-type": mime, Authorization: "Bearer " + state.token };
+    // The media type is not sent alongside the ciphertext: it travels inside
+    // the encrypted message as fileMeta.mime below, which is where the reader
+    // takes it from. Handing it to the server too would have told it what kind
+    // of file each opaque blob is, for no benefit.
+    const headers = { "content-type": "application/octet-stream", Authorization: "Bearer " + state.token };
     if (expireSec > 0) headers["x-expire-sec"] = String(expireSec);
     const r = await fetch("/api/upload", { method: "POST", headers, body: enc });
     const j = await r.json().catch(() => ({}));
@@ -1099,7 +1112,7 @@ async function openAttachment(m, node) {
   if (!m || !m.file || node.dataset.loading) return;
   const f = m.file; node.dataset.loading = "1";
   try {
-    const r = await fetch(`/api/file?id=${encodeURIComponent(f.id)}`);
+    const r = await authFetch(`/api/file?id=${encodeURIComponent(f.id)}`);
     if (!r.ok) { toast("file no longer available"); return; }
     const buf = await r.arrayBuffer();
     const blob = f.enc === "c1"
