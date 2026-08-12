@@ -21,7 +21,7 @@ import { createLog } from "./log.js";
 import { isTransport } from "./transport.js";
 import { connectNym } from "./nym.js";
 import { turnIceServers } from "./turn.js";
-import { HANDLE_RE, HEX_RE, DEVICE_ID_RE, AUTH_SECRET_RE, asHandle, asToken, isB64, validCard, readBody, streamToFile, json, timingEqual, originAllowed, hashPassword, verifyPassword, clampExpireSec, tryAcquireConn, releaseConn, staticRelPath, clientIp, makeLockout } from "./util.js";
+import { HANDLE_RE, DEVICE_ID_RE, AUTH_SECRET_RE, asHandle, asToken, isB64, validCard, readBody, streamToFile, json, timingEqual, originAllowed, hashPassword, verifyPassword, clampExpireSec, tryAcquireConn, releaseConn, staticRelPath, clientIp, makeLockout } from "./util.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.resolve(__dirname, "../web/public");

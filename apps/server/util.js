@@ -8,7 +8,7 @@ import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 export const HANDLE_RE = /^[a-z0-9_]{3,24}$/;
-export const B64_RE = /^[A-Za-z0-9+/=]{1,4096}$/;
+const B64_RE = /^[A-Za-z0-9+/=]{1,4096}$/;
 // Device ids specifically: the client generates 16 random bytes, so accept
 // exactly that. A looser rule would have taken 8 hex characters -
 // 32 bits - which is guessable, and a device id decides which row a device
