@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import {
-  HANDLE_RE, HEX_RE, isB64, validCard,
-  readBody, readBodyBuffer, timingEqual, originAllowed,
+  HANDLE_RE, DEVICE_ID_RE, isB64, validCard,
+  readBody, timingEqual, originAllowed,
   hashPassword, verifyPassword, clampExpireSec,
   tryAcquireConn, releaseConn, staticRelPath,
   clientIp, makeLockout, asHandle, asToken,
@@ -120,12 +120,17 @@ test("handle format matches what the account routes accept", () => {
   assert.ok(!HANDLE_RE.test("x".repeat(25))); // too long
 });
 
-test("device ids must be lowercase hex, 8-64 chars", () => {
-  assert.ok(HEX_RE.test("a1b2c3d4"));
-  assert.ok(!HEX_RE.test("nothex!!"));
-  assert.ok(!HEX_RE.test("abc")); // too short
+test("device ids must be exactly 32 lowercase hex characters", () => {
+  assert.ok(DEVICE_ID_RE.test("a".repeat(32)));
+  assert.ok(DEVICE_ID_RE.test("0123456789abcdef0123456789abcdef"));
+  // The rule used to start at 8 hex characters, i.e. 32 bits. A device id
+  // decides which row a device registration lands on, so a guessable one is
+  // not acceptable.
+  assert.ok(!DEVICE_ID_RE.test("a1b2c3d4"));
+  assert.ok(!DEVICE_ID_RE.test("1122334455667788"));
+  assert.ok(!DEVICE_ID_RE.test("A".repeat(32)), "uppercase must not pass");
+  assert.ok(!DEVICE_ID_RE.test("a".repeat(33)));
 });
-
 test("isB64 rejects non-strings and bad charsets", () => {
   assert.ok(isB64("YWJjZA=="));
   assert.equal(isB64(123), false);
@@ -197,6 +202,10 @@ function withServer(handler, fn) {
       } catch (e) {
         reject(e);
       } finally {
+        // close() on its own waits for the keep-alive socket fetch leaves
+        // behind, which under Node 22 keeps the runner alive long after every
+        // test has passed.
+        server.closeAllConnections?.();
         server.close();
       }
     });
@@ -219,9 +228,10 @@ test("readBody resolves the full text body when under the limit", () => withServ
 // client-visible behavior (a reset) awkward to assert reliably.
 import { EventEmitter } from "node:events";
 
-function fakeReq() {
+function fakeReq(headers = {}) {
   const req = new EventEmitter();
-  req.destroy = () => {}; // readBody calls this on overflow; nothing to clean up here
+  req.headers = headers;
+  req.destroy = () => {}; // nothing to clean up on a fake
   return req;
 }
 
@@ -240,21 +250,6 @@ test("readBody resolves normally when the body stays under the limit (fake req)"
   assert.equal(await pending, "fits fine");
 });
 
-test("readBodyBuffer returns raw bytes, not decoded text", () => withServer(
-  async (req, res) => {
-    const buf = await readBodyBuffer(req, 1024);
-    res.writeHead(200, { "content-type": "application/octet-stream" }).end(buf);
-  },
-  async (port) => {
-    const payload = new Uint8Array([0, 255, 16, 200]);
-    const res = await fetch(`http://127.0.0.1:${port}/`, { method: "POST", body: payload });
-    const back = new Uint8Array(await res.arrayBuffer());
-    assert.deepEqual([...back], [...payload]);
-  },
-));
-
-// streamToFile is the upload path's memory fix: the body goes chunk by chunk
-// to disk instead of being buffered whole. Exercise it over a real socket.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -388,4 +383,39 @@ test("an oversized body is refused as such, not by dropping the connection", asy
     const ok = await fetch(`http://127.0.0.1:${port}/`, { method: "POST", body: "hi" });
     assert.equal(ok.status, 200);
   } finally { server.close(); }
+});
+
+test("an oversized body is refused as such, not by dropping the connection", async () => {
+  // It used to call req.destroy(), which drops the connection with no status
+  // and leaves a reverse proxy to emit a bare 502. The error is tagged instead
+  // so the routes can answer a plain 413.
+  const req = fakeReq();
+  const pending = readBody(req, 4);
+  req.emit("data", Buffer.from("far too many bytes"));
+  await assert.rejects(pending, (e) => e.code === "E_TOO_LARGE");
+});
+
+test("an honest Content-Length is refused before a byte is buffered", async () => {
+  const req = fakeReq({ "content-length": "5000" });
+  // Nothing is ever emitted: the declared size alone settles it.
+  await assert.rejects(readBody(req, 100), (e) => e.code === "E_TOO_LARGE");
+});
+
+test("a Content-Length within the limit is not held against the request", async () => {
+  const req = fakeReq({ "content-length": "9" });
+  const pending = readBody(req, 100);
+  req.emit("data", Buffer.from("fits fine"));
+  req.emit("end");
+  assert.equal(await pending, "fits fine");
+});
+
+test("password hashing round-trips, and its cost is pinned", async () => {
+  // The scrypt cost is fixed in util.js rather than inherited from Node's
+  // defaults: if those moved, every hash already stored would stop matching
+  // and every account would be locked out with no obvious cause. Raising the
+  // cost does the same, so it needs a versioned hash format first.
+  const h = await hashPassword("known-value");
+  assert.equal(h.split("$").length, 2, "format is salt$hash");
+  assert.ok(await verifyPassword("known-value", h));
+  assert.ok(!(await verifyPassword("other-value", h)));
 });

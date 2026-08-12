@@ -21,7 +21,7 @@ import { createLog } from "./log.js";
 import { isTransport } from "./transport.js";
 import { connectNym } from "./nym.js";
 import { turnIceServers } from "./turn.js";
-import { HANDLE_RE, HEX_RE, AUTH_SECRET_RE, asHandle, asToken, isB64, validCard, readBody, streamToFile, json, timingEqual, originAllowed, hashPassword, verifyPassword, clampExpireSec, tryAcquireConn, releaseConn, staticRelPath, clientIp, makeLockout } from "./util.js";
+import { HANDLE_RE, HEX_RE, DEVICE_ID_RE, AUTH_SECRET_RE, asHandle, asToken, isB64, validCard, readBody, streamToFile, json, timingEqual, originAllowed, hashPassword, verifyPassword, clampExpireSec, tryAcquireConn, releaseConn, staticRelPath, clientIp, makeLockout } from "./util.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.resolve(__dirname, "../web/public");
@@ -443,12 +443,13 @@ async function main() {
           const username = await sessionUser(asToken(b.token));
           if (!username) return json(res, 401, { error: "not signed in" });
           if (await store.isBanned(username)) return json(res, 403, { error: "account suspended" });
-          if (typeof b.deviceId !== "string" || !HEX_RE.test(b.deviceId)) return json(res, 400, { error: "bad device id" });
+          if (typeof b.deviceId !== "string" || !DEVICE_ID_RE.test(b.deviceId)) return json(res, 400, { error: "bad device id" });
           if (!validCard(b.card) || b.card.handle.toLowerCase() !== username) return json(res, 400, { error: "card must match your handle" });
           await store.addDevice(b.deviceId, username, b.card, `${b.card.providerId}:${b.card.mailbox}`, CFG.maxDevicesPerAccount);
           return json(res, 200, { ok: true });
         } catch (e) {
           if (e && e.code === "E_DEVICE_LIMIT") return json(res, 409, { error: `device limit reached (max ${CFG.maxDevicesPerAccount})` });
+          if (e && e.code === "E_MAILBOX_TAKEN") return json(res, 409, { error: "mailbox already registered to another device" });
           return json(res, 400, { error: "bad request" });
         }
       }
@@ -461,7 +462,7 @@ async function main() {
           const b = JSON.parse(await readBody(req, CFG.maxBodyBytes));
           const username = await sessionUser(asToken(b.token));
           if (!username) return json(res, 401, { error: "not signed in" });
-          if (typeof b.deviceId !== "string" || !HEX_RE.test(b.deviceId)) return json(res, 400, { error: "bad device id" });
+          if (typeof b.deviceId !== "string" || !DEVICE_ID_RE.test(b.deviceId)) return json(res, 400, { error: "bad device id" });
           const mbk = await store.clearOtherDevices(username, b.deviceId);
           for (const k of mbk) { const set = mbkeySockets.get(k); if (set) for (const ws of set) { try { ws.close(4005, "signed out elsewhere"); } catch { /* */ } } }
           return json(res, 200, { ok: true, removed: mbk.length });

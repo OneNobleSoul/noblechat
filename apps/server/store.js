@@ -31,13 +31,44 @@ ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT 
 -- rows default to 1 and move to 2 the next time that account signs in.
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS auth_ver SMALLINT NOT NULL DEFAULT 1;
 CREATE TABLE IF NOT EXISTS devices (
-  device_id   TEXT PRIMARY KEY,
+  device_id   TEXT NOT NULL,
   username    TEXT NOT NULL REFERENCES accounts(username) ON DELETE CASCADE,
   card        TEXT NOT NULL,
   mbkey       TEXT,
-  created_at  BIGINT NOT NULL
+  created_at  BIGINT NOT NULL,
+  PRIMARY KEY (username, device_id)
 );
 CREATE INDEX IF NOT EXISTS idx_devices_user ON devices (username);
+-- device_id used to be the primary key on its own, which made it globally
+-- unique rather than unique per account. Combined with an upsert that updated
+-- the card but never checked the owner, anyone who knew another account's
+-- device_id could overwrite that row with their own key card and mailbox. The
+-- row stayed attached to the victim while its contents became the attacker's,
+-- so senders looking the victim up encrypted to the attacker instead: a full
+-- break of the end-to-end guarantee. A device_id is an identifier, not a
+-- secret - it sits in localStorage and travels on every device call - so it
+-- must never carry an authorization decision. Scoping the key to the account
+-- makes a foreign row structurally unreachable.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_index i
+    JOIN pg_class c ON c.oid = i.indexrelid
+    JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey)
+    WHERE i.indrelid = 'devices'::regclass AND i.indisprimary
+    GROUP BY c.relname HAVING count(*) = 1
+  ) THEN
+    EXECUTE 'ALTER TABLE devices DROP CONSTRAINT ' ||
+      (SELECT conname FROM pg_constraint WHERE conrelid = 'devices'::regclass AND contype = 'p');
+    ALTER TABLE devices ADD PRIMARY KEY (username, device_id);
+  END IF;
+END $$;
+-- A mailbox belongs to exactly one device, and therefore to exactly one
+-- account. Without this an attacker could publish a card of their own that
+-- names the victim's mailbox: the subscribe check would then see it among
+-- their own mbkeys and let them drain the victim's queue. They could not read
+-- the ciphertext, but the victim would stop receiving it.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_mbkey ON devices (mbkey) WHERE mbkey IS NOT NULL;
 CREATE TABLE IF NOT EXISTS sessions (
   token       TEXT PRIMARY KEY,
   username    TEXT NOT NULL,
@@ -125,18 +156,39 @@ export async function openStore(databaseUrl, { mailboxTtlMs = 7 * 24 * 3600 * 10
 
     // ---- devices ----
     async addDevice(deviceId, username, card, mbkey, maxDevices = 0) {
-      // Cap devices per account: unlimited registrations would multiply every
-      // fan-out (a message to the handle goes to each device) and grow the
-      // bundle without bound. Re-registering an existing deviceId is always
-      // allowed (it only updates the card), so we count the OTHER devices.
-      if (maxDevices > 0) {
-        const c = await pool.query("SELECT COUNT(*)::int AS n FROM devices WHERE username=$1 AND device_id<>$2", [username, deviceId]);
-        if (c.rows[0].n >= maxDevices) throw Object.assign(new Error("device limit reached"), { code: "E_DEVICE_LIMIT" });
-      }
-      await pool.query(
-        `INSERT INTO devices(device_id,username,card,mbkey,created_at) VALUES($1,$2,$3,$4,$5)
-         ON CONFLICT(device_id) DO UPDATE SET card=EXCLUDED.card, mbkey=EXCLUDED.mbkey`,
-        [deviceId, username, JSON.stringify(card), mbkey, now()]);
+      // The count and the insert run in one transaction, taking a row lock on
+      // the account first. Previously they were two statements with an await
+      // between them and nothing holding the gap, so concurrent registrations
+      // could each read a count below the cap and all proceed.
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        // Serialises concurrent device registrations for this account against
+        // each other without blocking anything else.
+        await client.query("SELECT 1 FROM accounts WHERE username=$1 FOR UPDATE", [username]);
+        // Cap devices per account: unlimited registrations would multiply every
+        // fan-out (a message to the handle goes to each device) and grow the
+        // bundle without bound. Re-registering an existing deviceId is always
+        // allowed (it only updates the card), so we count the OTHER devices.
+        if (maxDevices > 0) {
+          const c = await client.query("SELECT COUNT(*)::int AS n FROM devices WHERE username=$1 AND device_id<>$2", [username, deviceId]);
+          if (c.rows[0].n >= maxDevices) throw Object.assign(new Error("device limit reached"), { code: "E_DEVICE_LIMIT" });
+        }
+        // Conflict target is (username, device_id): an upsert can only ever
+        // touch a row this account already owns. It used to be device_id
+        // alone, which let a caller overwrite another account's device.
+        await client.query(
+          `INSERT INTO devices(device_id,username,card,mbkey,created_at) VALUES($1,$2,$3,$4,$5)
+           ON CONFLICT(username,device_id) DO UPDATE SET card=EXCLUDED.card, mbkey=EXCLUDED.mbkey`,
+          [deviceId, username, JSON.stringify(card), mbkey, now()]);
+        await client.query("COMMIT");
+      } catch (e) {
+        await client.query("ROLLBACK").catch(() => {});
+        // The unique index on mbkey rejects a card that claims a mailbox
+        // already registered to someone else's device.
+        if (e && e.code === "23505") throw Object.assign(new Error("mailbox already registered"), { code: "E_MAILBOX_TAKEN" });
+        throw e;
+      } finally { client.release(); }
     },
     async removeDevice(deviceId, username) {
       await pool.query("DELETE FROM devices WHERE device_id=$1 AND username=$2", [deviceId, username]);
