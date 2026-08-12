@@ -120,6 +120,20 @@ export function releaseConn(map, ip) {
   if (left <= 0) map.delete(ip); else map.set(ip, left);
 }
 
+// Map a request URL onto a path under the public directory. "/" serves the
+// public landing page; the chat client itself lives at "/app" (it used to be
+// at "/", so the old URL still has to land somewhere sensible for anyone who
+// bookmarked it - the landing page links straight on). A trailing slash is
+// accepted because browsers add one when a user types the bare path.
+// Everything else maps one to one and is resolved against PUBLIC by the
+// caller, which is also where the path-traversal check happens.
+export function staticRelPath(url) {
+  const p = String(url || "/").split("?")[0];
+  if (p === "/") return "/index.html";
+  if (p === "/app" || p === "/app/") return "/app.html";
+  return p;
+}
+
 // How long an uploaded attachment's ciphertext should live, in seconds. The
 // client sends this as the x-expire-sec header; 0/absent means "keep for the
 // usual mailbox TTL", negative and non-numeric values fall back to that same

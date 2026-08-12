@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Datenschutzerklärung - NobleChat</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◆</text></svg>">
+<style>
+:root{--bg:#06080c;--panel:#0d121b;--line:#1c2634;--text:#dbe4ee;--muted:#8695a8;--dim:#5c6a7d;--accent:#5eead4;--warn:#fbbf24;--mono:ui-monospace,Menlo,monospace;--sans:system-ui,-apple-system,sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.65;-webkit-font-smoothing:antialiased}
+.wrap{max-width:760px;margin:0 auto;padding:0 20px 70px}
+.top{display:flex;align-items:center;justify-content:space-between;padding:22px 0}
+.brand{font-family:var(--mono);font-weight:700;font-size:19px;color:var(--text);text-decoration:none}
+.brand::first-letter{color:var(--accent)}
+.back{font-family:var(--mono);font-size:13px;color:var(--muted);text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:7px 14px}
+.back:hover{color:var(--text)}
+h1{font-size:28px;margin:18px 0 6px;letter-spacing:-.4px}
+h2{font-size:18px;margin:34px 0 4px}
+h3{font-size:15px;margin:20px 0 2px;color:var(--accent)}
+p{margin:8px 0}
+p.muted,li.muted{color:var(--muted);font-size:14.5px}
+ul{margin:8px 0;padding-left:20px}
+li{margin:5px 0;font-size:14.5px;color:var(--muted)}
+li b{color:var(--text);font-weight:600}
+a{color:var(--accent)}
+.todo{background:color-mix(in srgb,var(--warn) 12%,var(--panel));border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));border-radius:12px;padding:16px 18px;margin:22px 0}
+.todo h3{margin:0 0 6px;font-size:15px;color:var(--warn)}
+.todo p{margin:0;color:var(--muted);font-size:14px}
+.fill{font-family:var(--mono);font-size:13.5px;color:var(--warn);background:#0a0e15;border:1px dashed color-mix(in srgb,var(--warn) 45%,var(--line));border-radius:6px;padding:1px 7px}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:14px 0}
+.box p{margin:0;font-size:14.5px;color:var(--muted)}
+.box p b{color:var(--accent)}
+footer{margin-top:44px;border-top:1px solid var(--line);padding-top:18px;font-family:var(--mono);font-size:12.5px}
+footer a{color:var(--muted);text-decoration:none;margin-right:16px}
+footer a:hover{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="/">◆ NobleChat</a>
+    <a class="back" href="/">← zurück</a>
+  </header>
+
+  <h1>Datenschutzerklärung</h1>
+  <p class="muted">Stand: Entwurf. Diese Erklärung beschreibt die Datenverarbeitung auf dieser Instanz von NobleChat.</p>
+
+  <div class="todo">
+    <h3>Entwurf: vor dem öffentlichen Start prüfen und ausfüllen</h3>
+    <p>Der technische Teil unten ist aus dem Quellcode dieser Instanz abgeleitet und beschreibt den tatsächlichen Stand. Offen sind die Angaben zum Verantwortlichen, zum Hosting und die dort genannten Punkte. Diese Seite ersetzt keine Rechtsberatung.</p>
+  </div>
+
+  <h2>1. Verantwortlicher</h2>
+  <p class="muted"><span class="fill">Vor- und Nachname</span>, <span class="fill">Anschrift</span>, E-Mail <span class="fill">kontakt@example.tld</span>. Vollständige Angaben im <a href="/imprint.html">Impressum</a>. Ein Datenschutzbeauftragter ist nach Art. 37 DSGVO nicht bestellt und für dieses Angebot nach derzeitiger Einschätzung nicht erforderlich.</p>
+
+  <h2>2. Grundprinzip</h2>
+  <div class="box">
+    <p>Nachrichten werden auf Ihrem Gerät verschlüsselt und erst auf dem Gerät der Empfängerin oder des Empfängers wieder entschlüsselt. Der Server erhält ausschließlich <b>opake Chiffrate</b>. Ihre privaten Schlüssel werden lokal im Browser erzeugt und verlassen Ihr Gerät nicht. Der Betreiber kann Nachrichteninhalte technisch nicht einsehen, auch nicht auf behördliche Anordnung.</p>
+  </div>
+
+  <h2>3. Daten, die auf dem Server gespeichert werden</h2>
+  <h3>Konto</h3>
+  <ul>
+    <li><b>Handle</b> (der selbst gewählte Benutzername). Ein Klarname ist nicht erforderlich.</li>
+    <li><b>Passwort-Hash</b>, berechnet mit scrypt und zufälligem Salt. Das Passwort selbst wird nicht gespeichert.</li>
+    <li><b>Zeitpunkt der Kontoerstellung.</b></li>
+    <li><b>Öffentliche Schlüsselkarten Ihrer Geräte</b> (Signatur- und Schlüsselaustausch-Public-Keys, Mailbox-Kennung). Diese sind bewusst öffentlich abrufbar, damit andere Ihnen verschlüsselt schreiben können.</li>
+    <li><b>Verschlüsselte Kontaktliste</b>, auf Ihrem Gerät mit einem aus Ihrem Passwort abgeleiteten Schlüssel verschlüsselt. Für den Server ist sie ein unlesbarer Datenblock.</li>
+    <li><b>Sitzungen</b>: gespeichert wird nur ein Hash des Sitzungstokens nebst Ablaufzeitpunkt (Gültigkeit 30 Tage).</li>
+  </ul>
+  <h3>Nachrichten und Anhänge</h3>
+  <ul>
+    <li><b>Zwischengespeicherte Nachrichten</b> für Empfänger, die gerade offline sind: ausschließlich als Chiffrat, ohne lesbare Absender- oder Empfängerangabe. Sie werden beim Abruf sofort gelöscht, spätestens jedoch nach <b>7 Tagen</b>; pro Postfach werden höchstens 1000 Einträge vorgehalten.</li>
+    <li><b>Dateianhänge</b> werden vor dem Hochladen auf Ihrem Gerät verschlüsselt. Der Server speichert das Chiffrat, dessen Größe, einen Typvermerk und einen Ablaufzeitpunkt, jedoch keine Zuordnung zu einem Konto. Löschung nach Ablauf, spätestens nach 7 Tagen, bei ausdrücklich längerer Frist nach höchstens 30 Tagen.</li>
+  </ul>
+  <h3>Was nicht gespeichert wird</h3>
+  <ul>
+    <li>Keine IP-Adressen in der Datenbank.</li>
+    <li>Keine Cookies, kein Tracking, keine Analyse- oder Statistikdienste, keine Werbung.</li>
+    <li>Keine Kontaktlisten im Klartext, keine Telefonnummern, keine E-Mail-Adressen.</li>
+    <li>Keine Protokollierung, wer wem wann geschrieben hat.</li>
+  </ul>
+
+  <h2>4. Nur vorübergehend im Arbeitsspeicher</h2>
+  <ul>
+    <li><b>IP-Adressen</b> werden zur Abwehr von Überlastung und Anmelde-Angriffen kurzzeitig im Arbeitsspeicher gezählt und spätestens etwa 10 Minuten nach der letzten Anfrage verworfen. Sie werden nicht auf Datenträger geschrieben.</li>
+    <li>Ein <b>Betriebsprotokoll</b> für die Administration hält die letzten 400 Ereignisse im Arbeitsspeicher (etwa Registrierungen unter Nennung des Handles, Sperrungen, Wartungsmodus). Es enthält keine IP-Adressen und geht bei jedem Neustart verloren.</li>
+    <li class="muted">Hinweis: Der vorgelagerte Webserver (Reverse Proxy) kann eigene Zugriffsprotokolle mit IP-Adressen führen. <span class="fill">Konfiguration prüfen und hier beschreiben, inklusive Speicherdauer</span>.</li>
+  </ul>
+
+  <h2>5. Verbindungen zu Dritten</h2>
+  <ul>
+    <li><b>Google Fonts</b>: Die Seiten laden derzeit Schriftarten von <span class="fill">fonts.googleapis.com / fonts.gstatic.com</span>. Dabei wird Ihre IP-Adresse an Google übertragen. <span class="fill">Vor dem öffentlichen Start sollten die Schriften lokal ausgeliefert werden, dann entfällt dieser Punkt ersatzlos.</span></li>
+    <li><b>STUN-Server bei Anrufen</b>: Für Sprach- und Videoanrufe wird derzeit ein öffentlicher STUN-Dienst von Google verwendet, um eine direkte Verbindung zu finden. Dabei wird Ihre IP-Adresse an diesen Dienst übermittelt. Ohne Anruf findet keine solche Verbindung statt.</li>
+    <li><b>Nym-Mixnet</b> (nur wenn dieser Transportweg aktiv ist): Ihr Browser lädt dafür Verzeichnisinformationen von der Nym-Validator-API und verbindet sich anschließend mit Knoten des öffentlichen Nym-Netzwerks.</li>
+    <li class="muted">Hosting: <span class="fill">Anbieter und Standort eintragen, Auftragsverarbeitungsvertrag nach Art. 28 DSGVO abschließen</span>.</li>
+  </ul>
+
+  <h2>6. Daten auf Ihrem eigenen Gerät</h2>
+  <p class="muted">Im lokalen Speicher Ihres Browsers liegen Ihre privaten Schlüssel, die Geräte-Kennung, das Sitzungstoken, Ihre Kontaktliste, Ihre Einstellungen sowie der verschlüsselte Gesprächsverlauf. Diese Daten werden nicht an den Server übertragen. Beim Abmelden werden sie bis auf die Geräte-Identität gelöscht; vollständig entfernen können Sie sie über die Websitedaten Ihres Browsers.</p>
+
+  <h2>7. Rechtsgrundlagen</h2>
+  <ul>
+    <li>Bereitstellung des Kontos und Zustellung der Nachrichten: Art. 6 Abs. 1 lit. b DSGVO (Erfüllung des Nutzungsverhältnisses).</li>
+    <li>Missbrauchsabwehr, Begrenzung von Anfragen und Sperrungen: Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse an einem funktionsfähigen und sicheren Betrieb).</li>
+  </ul>
+
+  <h2>8. Ihre Rechte</h2>
+  <p class="muted">Sie haben das Recht auf Auskunft (Art. 15), Berichtigung (Art. 16), Löschung (Art. 17), Einschränkung der Verarbeitung (Art. 18), Datenübertragbarkeit (Art. 20) und Widerspruch (Art. 21). Außerdem können Sie sich bei einer Datenschutz-Aufsichtsbehörde beschweren.</p>
+  <p class="muted">Zur Ausübung genügt eine formlose Nachricht an die im Impressum genannte Adresse. <span class="fill">Hinweis für den Betreiber: Eine Löschung des eigenen Kontos ist derzeit nur durch die Administration möglich, eine Selbstbedienungsfunktion in der App fehlt noch. Solange das so ist, muss dieser Weg hier ausdrücklich benannt und die Bearbeitung zugesagt werden.</span></p>
+
+  <h2>9. Änderungen</h2>
+  <p class="muted">Diese Erklärung wird angepasst, wenn sich die Verarbeitung ändert. Der Quellcode dieser Instanz ist unter <a href="https://github.com/OneNobleSoul/noblechat">github.com/OneNobleSoul/noblechat</a> öffentlich einsehbar und damit überprüfbar.</p>
+
+  <footer>
+    <a href="/">Start</a>
+    <a href="/imprint.html">Impressum</a>
+    <a href="/app">Zur App</a>
+    <a href="https://github.com/OneNobleSoul/noblechat">Quellcode</a>
+  </footer>
+</div>
+</body>
+</html>

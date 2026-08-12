@@ -3,7 +3,7 @@
 // exactly like the browser. Point it at another deployment with NOBLECHAT_URL.
 const { app, BrowserWindow, shell } = require("electron");
 
-const APP_URL = process.env.NOBLECHAT_URL || "https://chat.noblesoul.tech/";
+const APP_URL = process.env.NOBLECHAT_URL || "https://chat.noblesoul.tech/app";
 
 function createWindow() {
   const win = new BrowserWindow({
