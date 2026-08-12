@@ -21,7 +21,7 @@ import { createLog } from "./log.js";
 import { isTransport } from "./transport.js";
 import { connectNym } from "./nym.js";
 import { turnIceServers } from "./turn.js";
-import { HANDLE_RE, HEX_RE, isB64, validCard, readBody, streamToFile, json, timingEqual, originAllowed, hashPassword, verifyPassword, clampExpireSec, tryAcquireConn, releaseConn, staticRelPath } from "./util.js";
+import { HANDLE_RE, HEX_RE, isB64, validCard, readBody, streamToFile, json, timingEqual, originAllowed, hashPassword, verifyPassword, clampExpireSec, tryAcquireConn, releaseConn, staticRelPath, clientIp, makeLockout } from "./util.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.resolve(__dirname, "../web/public");
@@ -63,6 +63,12 @@ const CFG = {
   // needed when the browser page is served from a different host than the
   // gateway. Comma-separated, e.g. "https://chat.example.com".
   allowedOrigins: (process.env.ALLOWED_ORIGINS || "").split(",").map((s) => s.trim()).filter(Boolean),
+  // How many reverse proxies of our own sit in front of this process. Every
+  // per-IP limit here is only as trustworthy as this number: see clientIp() in
+  // util.js for why the leftmost X-Forwarded-For entry must never be used.
+  // 1 matches the default deployment (Caddy in front). Set 0 when the gateway
+  // is exposed directly, or 2 when a CDN fronts Caddy.
+  trustedProxyHops: Number(process.env.TRUSTED_PROXY_HOPS ?? 1),
 };
 
 function computeVersion() {
@@ -103,7 +109,6 @@ function setSecurityHeaders(res) {
   res.setHeader("Permissions-Policy", "camera=(self), microphone=(self), geolocation=(), payment=()");
   res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
 }
-function clientIp(req) { const xff = req.headers["x-forwarded-for"]; if (xff) return String(xff).split(",")[0].trim(); return (req.socket && req.socket.remoteAddress) || "unknown"; }
 function rateLimiter({ capacity, refillPerSec }) {
   const buckets = new Map();
   setInterval(() => { const now = Date.now(); for (const [k, b] of buckets) if (now - b.last > 600000) buckets.delete(k); }, 300000).unref();
@@ -187,6 +192,20 @@ async function main() {
 
   const httpLimit = rateLimiter({ capacity: 60, refillPerSec: 10 });
   const authLimit = rateLimiter({ capacity: 10, refillPerSec: 0.5 }); // login/register brute-force guard
+  // Per-handle backoff on top of the per-IP bucket above. The bucket alone only
+  // slows one address down; an attacker spread across many addresses would keep
+  // a full allowance per address while pounding a single account. Keyed on the
+  // submitted handle whether or not it exists, so it never reveals which is which.
+  const loginLockout = makeLockout({ threshold: 5, baseDelayMs: 2000, maxDelayMs: 15 * 60 * 1000 });
+  // Reject an attempt that is currently backed off. Returns true when it has
+  // already answered the request.
+  const lockedOut = (res, handle) => {
+    const wait = loginLockout.retryAfter(handle);
+    if (!wait) return false;
+    res.setHeader("Retry-After", String(wait));
+    json(res, 429, { error: "too many attempts, try again later" });
+    return true;
+  };
   const submitLimit = rateLimiter({ capacity: 120, refillPerSec: 40 });
 
   // Admin access is granted two ways: the shared ADMIN_TOKEN (bootstrap / owner)
@@ -235,7 +254,7 @@ async function main() {
   const server = http.createServer(async (req, res) => {
     setSecurityHeaders(res);
     const url = new URL(req.url, "http://x");
-    const ip = clientIp(req);
+    const ip = clientIp(req, CFG.trustedProxyHops);
     try {
       if (url.pathname === "/healthz") { res.writeHead(200).end("ok"); return; }
       if (url.pathname === "/readyz") { try { await store.stats(); res.writeHead(200).end("ready"); } catch { res.writeHead(503).end("not ready"); } return; }
@@ -276,9 +295,14 @@ async function main() {
         try {
           const b = JSON.parse(await readBody(req, CFG.maxBodyBytes));
           const username = String(b.username || "").toLowerCase();
+          if (lockedOut(res, username)) return;
           const acc = await store.getAccount(username);
-          if (!acc || !(await verifyPassword(String(b.password || ""), acc.pass))) return json(res, 401, { error: "wrong handle or password" });
+          if (!acc || !(await verifyPassword(String(b.password || ""), acc.pass))) {
+            loginLockout.fail(username);
+            return json(res, 401, { error: "wrong handle or password" });
+          }
           if (acc.banned) return json(res, 403, { error: "account suspended" });
+          loginLockout.succeed(username);
           counters.logins++;
           const token = crypto.randomBytes(32).toString("hex");
           await store.createSession(token, username, CFG.sessionTtlMs);
@@ -442,10 +466,15 @@ async function main() {
           try {
             const b = JSON.parse(await readBody(req, CFG.maxBodyBytes));
             const username = String(b.username || "").toLowerCase();
+            if (lockedOut(res, username)) return;
             const acc = await store.getAccount(username);
-            if (!acc || !(await verifyPassword(String(b.password || ""), acc.pass))) return json(res, 401, { error: "wrong handle or password" });
+            if (!acc || !(await verifyPassword(String(b.password || ""), acc.pass))) {
+              loginLockout.fail(username);
+              return json(res, 401, { error: "wrong handle or password" });
+            }
             if (acc.banned) return json(res, 403, { error: "account suspended" });
             if (!acc.is_admin) return json(res, 403, { error: "not an admin account" });
+            loginLockout.succeed(username);
             const token = crypto.randomBytes(32).toString("hex");
             await store.createSession(token, username, CFG.sessionTtlMs);
             elog.add("info", "admin signed in", username);
@@ -529,7 +558,7 @@ async function main() {
     // A browser always sends Origin on a WS handshake; reject cross-origin ones
     // so a malicious page can't open a gateway socket in a visitor's browser.
     if (!originAllowed(req.headers.origin, req.headers.host, CFG.allowedOrigins)) { ws.close(4008, "forbidden origin"); return; }
-    const ip = clientIp(req);
+    const ip = clientIp(req, CFG.trustedProxyHops);
     if (!tryAcquireConn(connPerIp, ip, CFG.maxConnPerIp)) { ws.close(1013, "too many connections"); return; }
     sockets.add(ws);
     let unsub = null; let myMbkey = null;

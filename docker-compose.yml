@@ -45,6 +45,12 @@ services:
       TURN_SHARED_SECRET: ${TURN_SHARED_SECRET:-}
       TURN_URIS: ${TURN_URIS:-}
       FILES_DIR: /app/data/files
+      # Number of your own reverse proxies in front of the gateway. Every
+      # per-IP limit (login throttling, connection caps) depends on this being
+      # right: with 1, the gateway trusts only the last X-Forwarded-For entry,
+      # which is the one your proxy appended. Set 0 if you expose the port
+      # directly, or 2 if a CDN sits in front of your proxy.
+      TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-1}
     volumes:
       - noblechat-files:/app/data/files
     # Published on loopback only: put your own reverse proxy (Caddy, nginx)

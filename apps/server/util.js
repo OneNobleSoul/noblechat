@@ -102,6 +102,33 @@ export async function verifyPassword(pw, stored) {
   return got.length === want.length && crypto.timingSafeEqual(got, want);
 }
 
+// Work out who is actually calling, from behind our reverse proxy.
+//
+// X-Forwarded-For is append-only and every hop trusts the value it was handed,
+// so the LEFTMOST entry is whatever the client felt like sending - it is not
+// evidence of anything. Reading that entry made every per-IP limit here
+// (login/register throttling, connection caps) trivially bypassable: send a
+// fresh fake XFF on each request and every attempt looks like a new visitor.
+//
+// Only the entries our own proxies appended can be trusted. Each hop appends
+// the address it received the connection from, so with `hops` trusted proxies
+// in front of us the real client address is the `hops`-th entry counted from
+// the right. Anything to the left of it is attacker-controlled and ignored.
+// With no proxy in front (hops = 0) we ignore the header entirely and use the
+// socket address, which cannot be forged.
+export function clientIp(req, hops = 1) {
+  const n = Math.max(0, Math.floor(Number(hops) || 0));
+  const direct = (req.socket && req.socket.remoteAddress) || "unknown";
+  if (n === 0) return direct;
+  const raw = req.headers && req.headers["x-forwarded-for"];
+  if (!raw) return direct;
+  const parts = String(raw).split(",").map((s) => s.trim()).filter(Boolean);
+  // Fewer entries than trusted hops means the header did not come through the
+  // expected chain; fall back to the socket rather than trusting a short list.
+  if (parts.length < n) return direct;
+  return parts[parts.length - n] || direct;
+}
+
 // Per-IP WebSocket connection accounting for the gateway's connection cap.
 // A slot is only counted once a connection is actually accepted; releaseConn
 // undoes exactly that accounting when it later closes. Counting a rejected
@@ -118,6 +145,63 @@ export function tryAcquireConn(map, ip, max) {
 export function releaseConn(map, ip) {
   const left = (map.get(ip) || 1) - 1;
   if (left <= 0) map.delete(ip); else map.set(ip, left);
+}
+
+// Per-account login throttle with exponential backoff.
+//
+// The per-IP token bucket alone is not enough: an attacker with a pool of
+// addresses gets a fresh allowance from each one, while a single account is
+// hammered as hard as they like. This tracks failures per handle instead, so
+// guessing one account's password gets slower no matter where the attempts
+// come from.
+//
+// Keyed on the submitted handle whether or not it exists, so a locked-out
+// response never doubles as an account-existence oracle.
+//
+// Deliberately capped and self-pruning: a map keyed by attacker-supplied
+// handles is otherwise an unbounded-growth sink. Entries expire once the
+// backoff has elapsed, and at the cap the oldest entries are dropped first
+// (Map iterates in insertion order).
+// The failure count deliberately outlives the current backoff window
+// (`forgetAfterMs`). If the counter reset the moment a lock expired, an
+// attacker would simply wait out each delay and get another full `threshold`
+// of free guesses forever - the backoff would never actually escalate.
+export function makeLockout({ threshold = 5, baseDelayMs = 1000, maxDelayMs = 15 * 60 * 1000, forgetAfterMs = 60 * 60 * 1000, maxEntries = 10000 } = {}) {
+  const hits = new Map();
+  const delayFor = (fails) => {
+    if (fails < threshold) return 0;
+    const steps = Math.min(fails - threshold, 20); // 2^20 already exceeds maxDelayMs
+    return Math.min(maxDelayMs, baseDelayMs * 2 ** steps);
+  };
+  const prune = (now) => {
+    for (const [k, e] of hits) if (e.forgetAt <= now) hits.delete(k);
+    while (hits.size > maxEntries) hits.delete(hits.keys().next().value);
+  };
+  return {
+    // How long this key must wait, in seconds. 0 means "go ahead".
+    retryAfter(key, now = Date.now()) {
+      const e = hits.get(key);
+      if (!e) return 0;
+      if (e.forgetAt <= now) { hits.delete(key); return 0; }
+      if (e.until <= now) return 0; // lock elapsed, but the history stays
+      return Math.ceil((e.until - now) / 1000);
+    },
+    fail(key, now = Date.now()) {
+      const prev = hits.get(key);
+      const e = prev && prev.forgetAt > now ? prev : { fails: 0, until: 0, forgetAt: 0 };
+      e.fails += 1;
+      e.until = now + delayFor(e.fails);
+      e.forgetAt = Math.max(now + forgetAfterMs, e.until);
+      // Re-insert so the entry counts as recently used for the cap eviction.
+      hits.delete(key); hits.set(key, e);
+      if (hits.size > maxEntries || e.fails % 32 === 0) prune(now);
+      return Math.ceil(delayFor(e.fails) / 1000);
+    },
+    // A correct password clears the record, so a legitimate user who mistyped
+    // a few times is not left throttled.
+    succeed(key) { hits.delete(key); },
+    size() { return hits.size; },
+  };
 }
 
 // Map a request URL onto a path under the public directory. "/" serves the
