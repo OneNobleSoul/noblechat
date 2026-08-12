@@ -77,7 +77,7 @@ function computeVersion() {
   // because the ?v= query never moved).
   try {
     const h = crypto.createHash("sha256");
-    for (const f of ["app.bundle.js", "style.css", "landing-gate.js"]) {
+    for (const f of ["app.bundle.js", "style.css", "landing-gate.js", "admin.js", "fonts.css", "admin.css", "index.css", "info.css", "privacy.css", "imprint.css"]) {
       try { h.update(fs.readFileSync(path.join(PUBLIC, f))); } catch { /* */ }
     }
     return h.digest("hex").slice(0, 12);
@@ -88,16 +88,39 @@ const APP_VERSION = process.env.APP_VERSION || computeVersion();
 const MIME = {
   ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml",
   ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png", ".ico": "image/x-icon",
+  // Needed for the self-hosted fonts: with nosniff set, a font served as
+  // application/octet-stream is refused by the browser and the page silently
+  // falls back to a system face.
+  ".woff2": "font/woff2",
 };
+// Where the page is allowed to send data.
+//
+// This used to end in a blanket `https:`, which meant any injected script had
+// a ready-made exfiltration channel to any host on the internet - undoing much
+// of what the rest of this policy buys. The wildcard exists only for the nym
+// transport: its WASM client picks validators and gateways at runtime, so
+// their hostnames genuinely aren't known here.
+//
+// So it is only granted when that transport is actually wired up. A deployment
+// without a nym sidecar - the default - gets 'self' and nothing else. Where it
+// is in use, NYM_CONNECT_SRC narrows the wildcard to the specific hosts of a
+// known validator set.
+function connectSrc() {
+  const base = ["'self'"];
+  if (!CFG.nymClientUrl) return base.join(" ");
+  const configured = (process.env.NYM_CONNECT_SRC || "").split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+  return base.concat(configured.length ? configured : ["https:", "wss:"]).join(" ");
+}
 const CSP = [
   "default-src 'self'", "base-uri 'self'", "object-src 'none'", "frame-ancestors 'none'",
-  "img-src 'self' data: blob:", "media-src 'self' blob:", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src 'self' https://fonts.gstatic.com",
+  "img-src 'self' data: blob:", "media-src 'self' blob:",
+  // Fonts are served from here, so no third-party style or font origin is
+  // needed and no visitor's address is handed to a font CDN.
+  "style-src 'self'", "font-src 'self'",
   // 'wasm-unsafe-eval' lets the lazily-loaded nym transport instantiate its
   // WebAssembly mix client; it does not permit JS eval.
   "script-src 'self' 'wasm-unsafe-eval'",
-  // https: for the nym validator API and gateways the WASM client dials.
-  "connect-src 'self' ws: wss: https:", "manifest-src 'self'",
+  `connect-src ${connectSrc()}`, "manifest-src 'self'",
   // blob: for the nym SDK's web worker.
   "worker-src 'self' blob:", "child-src 'self' blob:",
 ].join("; ");
@@ -279,6 +302,9 @@ async function main() {
         data = Buffer.from(data.toString("utf8").replace(/__V__/g, APP_VERSION));
       }
       if (noCache) headers["Cache-Control"] = "no-cache";
+      // Font files carry their weight and subset in the filename, so a changed
+      // font is a changed URL and these can be cached hard.
+      else if (path.extname(file) === ".woff2") headers["Cache-Control"] = "public, max-age=31536000, immutable";
       res.writeHead(200, headers);
       res.end(data);
     });

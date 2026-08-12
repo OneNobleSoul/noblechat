@@ -5,47 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NobleChat · Admin</title>
 <link rel="icon" href="/icons/favicon-32.png">
-<style>
-:root{--bg:#06080c;--panel:#0d121b;--panel2:#111a26;--line:#1c2634;--text:#dbe4ee;--muted:#8695a8;--dim:#5c6a7d;--accent:#5eead4;--danger:#fb7185;--warn:#fbbf24;--ok:#4ade80;--mono:ui-monospace,Menlo,monospace;--sans:Inter,system-ui,sans-serif}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh}
-a{color:var(--accent)}
-.wrap{max-width:960px;margin:0 auto;padding:28px 20px 60px}
-h1{font-family:var(--mono);font-size:20px;margin:0 0 2px}
-.sub{color:var(--dim);font-size:13px;margin:0 0 24px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:18px}
-.card h2{font-size:13px;text-transform:uppercase;letter-spacing:1.4px;color:var(--dim);font-family:var(--mono);margin:0 0 14px}
-label{display:block;font-size:12px;color:var(--muted);margin:0 0 6px}
-input,textarea{width:100%;background:#080b11;border:1px solid var(--line);border-radius:9px;color:var(--text);padding:11px;font-size:14px;font-family:var(--sans);margin-bottom:12px}
-input:focus,textarea:focus{outline:none;border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
-.btn{background:linear-gradient(180deg,var(--accent),#2dd4bf);color:#04120f;border:0;padding:9px 16px;border-radius:9px;font-weight:600;font-size:13px;cursor:pointer}
-.btn.ghost{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
-.btn.danger{background:transparent;color:var(--danger);border:1px solid color-mix(in srgb,var(--danger) 45%,var(--line))}
-.btn.warn{background:transparent;color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 45%,var(--line))}
-.btn+.btn{margin-left:8px}
-.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-.stat{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px}
-.stat b{display:block;font-size:22px;font-family:var(--mono)}
-.stat span{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:1px}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line)}
-th{color:var(--dim);font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:1px}
-.pill{font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
-.pill.on{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,var(--line))}
-.pill.off{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 40%,var(--line))}
-.err{color:var(--danger);font-size:13px;font-family:var(--mono)}
-.lvl{font-family:var(--mono);font-size:11px;text-transform:uppercase}
-.lvl-info{color:var(--muted)}.lvl-warn{color:var(--warn)}.lvl-error{color:var(--danger)}
-.pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 40%,var(--line))}
-.pill.bad{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 45%,var(--line))}
-.btn.active{outline:2px solid var(--accent);outline-offset:1px}
-.btn[disabled]{opacity:.45;cursor:not-allowed}
-.muted{color:var(--dim);font-size:12px}
-#login{max-width:400px;margin:12vh auto 0}
-.hidden{display:none}
-.tools .btn{font-size:12px;padding:6px 10px}
-</style>
+<link rel="stylesheet" href="/admin.css?v=__V__">
 </head>
 <body>
 <div class="wrap">
@@ -57,7 +17,7 @@ th{color:var(--dim);font-family:var(--mono);font-size:11px;text-transform:upperc
     <label for="login-pass">Password</label>
     <input id="login-pass" type="password" placeholder="password" autocomplete="current-password">
     <button id="login-acct" class="btn">Sign in</button>
-    <p class="muted" style="margin:16px 0 6px">Or use the admin token</p>
+    <p class="muted or-token">Or use the admin token</p>
     <label for="token">Admin token</label>
     <input id="token" type="password" placeholder="admin token" autocomplete="off">
     <button id="login-go" class="btn ghost">Sign in with token</button>
@@ -65,7 +25,7 @@ th{color:var(--dim);font-family:var(--mono);font-size:11px;text-transform:upperc
   </div>
 
   <div id="dash" class="hidden">
-    <div class="row" style="justify-content:space-between;align-items:flex-end">
+    <div class="row spread">
       <div><h1>◆ NobleChat Admin</h1><p class="sub" id="ver">-</p></div>
       <div class="tools"><button id="refresh" class="btn ghost">Refresh</button><button id="logout" class="btn ghost">Sign out</button></div>
     </div>
@@ -86,7 +46,7 @@ th{color:var(--dim);font-family:var(--mono);font-size:11px;text-transform:upperc
 
     <div class="card">
       <h2>Transport</h2>
-      <div class="row" style="margin-bottom:12px">
+      <div class="row mb-12">
         <span>Active:</span> <span id="tr-pill" class="pill">-</span>
         <span id="tr-nym-state" class="muted"></span>
       </div>
@@ -94,22 +54,22 @@ th{color:var(--dim);font-family:var(--mono);font-size:11px;text-transform:upperc
         <button id="tr-internal" class="btn ghost">Internal mixnet</button>
         <button id="tr-nym" class="btn ghost">Nym mixnet</button>
       </div>
-      <p class="muted" style="margin-bottom:0">Internal runs our own node fleet. Nym routes through the public Nym network and needs the nym-client sidecar up before it can be enabled.</p>
+      <p class="muted mb-0">Internal runs our own node fleet. Nym routes through the public Nym network and needs the nym-client sidecar up before it can be enabled.</p>
       <p id="tr-err" class="err hidden"></p>
     </div>
 
     <div class="card">
       <h2>Mix nodes</h2>
-      <div class="row" style="margin-bottom:10px"><button id="nodes-check" class="btn ghost">Check health</button></div>
+      <div class="row mb-10"><button id="nodes-check" class="btn ghost">Check health</button></div>
       <table><thead><tr><th>Node</th><th>Status</th></tr></thead><tbody id="nodes"></tbody></table>
       <p id="nodes-empty" class="muted">Not checked yet.</p>
     </div>
 
     <div class="card">
       <h2>Server log</h2>
-      <div class="row" style="margin-bottom:10px">
+      <div class="row mb-10">
         <button id="log-refresh" class="btn ghost">Refresh</button>
-        <label class="row" style="margin:0;gap:6px;color:var(--muted);font-size:12px"><input type="checkbox" id="log-auto" checked style="width:auto;margin:0">auto-refresh</label>
+        <label class="row inline-check"><input type="checkbox" id="log-auto" checked>auto-refresh</label>
       </div>
       <table><thead><tr><th>Time</th><th>Level</th><th>Event</th><th>Detail</th></tr></thead><tbody id="log"></tbody></table>
       <p id="log-empty" class="muted">Nothing logged yet.</p>
@@ -124,7 +84,7 @@ th{color:var(--dim);font-family:var(--mono);font-size:11px;text-transform:upperc
 
     <div class="card">
       <h2>Maintenance mode</h2>
-      <div class="row" style="margin-bottom:12px"><span>Status:</span> <span id="maint-pill" class="pill">-</span></div>
+      <div class="row mb-12"><span>Status:</span> <span id="maint-pill" class="pill">-</span></div>
       <label for="maint-msg">Maintenance message (optional)</label>
       <input id="maint-msg" placeholder="We'll be right back…">
       <div class="row"><button id="maint-on" class="btn warn">Enable maintenance</button><button id="maint-off" class="btn ghost">Disable</button></div>

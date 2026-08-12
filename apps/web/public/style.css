@@ -353,3 +353,14 @@ body.lb-open{overflow:hidden}
 .msg.unverified{border:1px solid color-mix(in srgb,var(--warn) 55%,var(--line))}
 .msg-unverified{display:block;margin-top:4px;font-size:11px;font-weight:600;color:var(--warn)}
 .mini-icon.warn{color:var(--warn)}
+
+/* Staggered cover-traffic dots in the network panel. These offsets used to be
+   written into a style="" attribute as the markup was built; keeping them here
+   lets the CSP refuse inline styles altogether. */
+.fd-1 { animation-delay: 0s;   top: 13px; }
+.fd-2 { animation-delay: .8s;  top: 21px; }
+.fd-3 { animation-delay: 1.6s; top: 20px; }
+.fd-4 { animation-delay: 2.4s; top: 19px; }
+.fd-5 { animation-delay: 3.2s; top: 18px; }
+.fd-6 { animation-delay: 4s;   top: 17px; }
+.net-note.pad { padding: 12px; }
