@@ -25,6 +25,19 @@ await esbuild.build({
 });
 console.log("landing gate bundled → apps/web/public/landing-gate.js");
 
+// The admin panel is bundled too, so it can share the auth secret derivation
+// with the chat client rather than keeping a second copy of the KDF in sync.
+await esbuild.build({
+  entryPoints: ["apps/web/src/admin.js"],
+  bundle: true,
+  format: "iife",
+  target: ["es2020"],
+  outfile: "apps/web/public/admin.js",
+  legalComments: "none",
+  logLevel: "info",
+});
+console.log("admin panel bundled → apps/web/public/admin.js");
+
 // The nym transport ships as its own bundle: it embeds a multi-megabyte WASM
 // SDK, so it must not weigh down the main client. main.js loads it lazily, only
 // when the nym transport is active.

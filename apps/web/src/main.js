@@ -9,6 +9,7 @@ import {
   serializeIdentity, deserializeIdentity,
 } from "../../../packages/net/src/serialize.js";
 import { toB64, fromB64, poissonDelay, keysFingerprint } from "../../../packages/crypto/src/util.js";
+import { deriveAuthSecret } from "../../../packages/crypto/src/authsecret.js";
 import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining, normalizeFile } from "./text-utils.js";
 import { parsePinsJson, pinsToObject, mergeSyncedPin } from "./pin-utils.js";
 import { reactionsAfterToggle, canUnsend, trimHistory, shouldStickToBottom } from "./message-utils.js";
@@ -94,6 +95,10 @@ async function deriveBlobKey(password, username, iterations = PBKDF2_ITERS) {
   const base = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]);
   return crypto.subtle.deriveKey({ name: "PBKDF2", salt: enc.encode("noblechat:" + username), iterations, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
 }
+
+// deriveAuthSecret (what the server gets instead of the password) lives in
+// packages/crypto/src/authsecret.js, shared with the admin panel and the smoke
+// test. See the comment there for why the two salts must differ.
 // Decrypt a blob with the current key; if that fails and we hold a legacy
 // fallback key (only set on a fresh password login), try that too. Returns
 // { data, migrated } - migrated:true means the caller should re-encrypt the
@@ -185,13 +190,31 @@ async function doAuth() {
   const pass = $("#auth-pass").value;
   const err = $("#setup-err"); err.hidden = true;
   if (!/^[a-z0-9_]{3,24}$/.test(user)) { err.textContent = "Handle: 3-24 chars, a-z 0-9 _"; err.hidden = false; return; }
-  if (pass.length < 8) { err.textContent = "Password must be at least 8 characters."; err.hidden = false; return; }
+  // The server can't judge password strength any more - it never sees the
+  // password - so the minimum is enforced here, the only place that still
+  // holds it. New accounts must clear 12; sign-in stays at 8 so accounts
+  // created under the old minimum are not locked out of their own data.
+  const minLen = state.authMode === "register" ? 12 : 8;
+  if (pass.length < minLen) { err.textContent = `Password must be at least ${minLen} characters.`; err.hidden = false; return; }
   $("#auth-go").disabled = true;
 
   try {
     const ep = state.authMode === "register" ? "/api/account/register" : "/api/account/login";
-    const r = await fetch(ep, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: user, password: pass }) });
-    const j = await r.json().catch(() => ({}));
+    const authSecret = await deriveAuthSecret(pass, user);
+    const post = (body) => fetch(ep, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+    let r = await post({ username: user, authSecret });
+    let j = await r.json().catch(() => ({}));
+    // Accounts created before the split still have a hash over the raw
+    // password, so the server can't check an auth secret against them yet. It
+    // asks for one retry with the password, verifies that, and stores the auth
+    // secret from then on - a silent one-time upgrade, no password reset.
+    // The retry flag comes back on every failed sign-in, including for handles
+    // that don't exist, so it can't be used to tell which accounts are old.
+    if (!r.ok && j.retryLegacy) {
+      r = await post({ username: user, password: pass, authSecret });
+      j = await r.json().catch(() => ({}));
+    }
     if (!r.ok) throw new Error(j.error || "authentication failed");
 
     state.token = j.token; state.user = user;

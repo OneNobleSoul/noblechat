@@ -10,6 +10,10 @@ import { pipeline } from "node:stream/promises";
 export const HANDLE_RE = /^[a-z0-9_]{3,24}$/;
 export const B64_RE = /^[A-Za-z0-9+/=]{1,4096}$/;
 export const HEX_RE = /^[a-f0-9]{8,64}$/;
+// What clients send instead of a password: 256 bits, lowercase hex, derived
+// browser-side under the auth salt. Fixed length, so it is checked exactly
+// rather than coerced.
+export const AUTH_SECRET_RE = /^[a-f0-9]{64}$/;
 
 export const isB64 = (s) => typeof s === "string" && B64_RE.test(s);
 

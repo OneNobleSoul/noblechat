@@ -21,7 +21,7 @@ import { createLog } from "./log.js";
 import { isTransport } from "./transport.js";
 import { connectNym } from "./nym.js";
 import { turnIceServers } from "./turn.js";
-import { HANDLE_RE, HEX_RE, isB64, validCard, readBody, streamToFile, json, timingEqual, originAllowed, hashPassword, verifyPassword, clampExpireSec, tryAcquireConn, releaseConn, staticRelPath, clientIp, makeLockout } from "./util.js";
+import { HANDLE_RE, HEX_RE, AUTH_SECRET_RE, isB64, validCard, readBody, streamToFile, json, timingEqual, originAllowed, hashPassword, verifyPassword, clampExpireSec, tryAcquireConn, releaseConn, staticRelPath, clientIp, makeLockout } from "./util.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.resolve(__dirname, "../web/public");
@@ -196,7 +196,37 @@ async function main() {
   // slows one address down; an attacker spread across many addresses would keep
   // a full allowance per address while pounding a single account. Keyed on the
   // submitted handle whether or not it exists, so it never reveals which is which.
-  const loginLockout = makeLockout({ threshold: 5, baseDelayMs: 2000, maxDelayMs: 15 * 60 * 1000 });
+  // Threshold sits at 8 rather than 5 because a legacy account's first sign-in
+  // legitimately costs two attempts (auth secret, then the one-time password
+  // retry). Guessing is expensive for the attacker regardless: every candidate
+  // needs its own 600k-iteration derivation before it can even be submitted.
+  const loginLockout = makeLockout({ threshold: 8, baseDelayMs: 2000, maxDelayMs: 15 * 60 * 1000 });
+  // Check a sign-in against whichever scheme this account is on, upgrading it
+  // to the new one when an old account proves its password.
+  async function verifyAuth(acc, b) {
+    if (acc.auth_ver >= 2) {
+      const secret = String(b.authSecret || "");
+      if (!AUTH_SECRET_RE.test(secret)) return false;
+      return await verifyPassword(secret, acc.pass);
+    }
+    // Pre-split account: the stored hash is over the raw password, so that is
+    // the only thing we can check it against.
+    if (typeof b.password !== "string" || !b.password) return false;
+    if (!(await verifyPassword(b.password, acc.pass))) return false;
+    if (AUTH_SECRET_RE.test(String(b.authSecret || ""))) {
+      await store.upgradeAuth(acc.username, await hashPassword(String(b.authSecret)));
+      elog.add("info", "auth upgraded", acc.username);
+    }
+    return true;
+  }
+  // A failed sign-in that carried no password gets told to retry the old way.
+  // Sent on every such failure, including for handles that do not exist, so it
+  // never doubles as an "this account is old" oracle.
+  const authFailure = (res, b) => {
+    const body = { error: "wrong handle or password" };
+    if (typeof b.password !== "string") body.retryLegacy = true;
+    return json(res, 401, body);
+  };
   // Reject an attempt that is currently backed off. Returns true when it has
   // already answered the request.
   const lockedOut = (res, handle) => {
@@ -283,9 +313,13 @@ async function main() {
           const b = JSON.parse(await readBody(req, CFG.maxBodyBytes));
           const username = String(b.username || "").toLowerCase();
           if (!HANDLE_RE.test(username)) return json(res, 400, { error: "handle must be 3-24 chars: a-z 0-9 _" });
-          if (typeof b.password !== "string" || b.password.length < 8) return json(res, 400, { error: "password too short (min 8)" });
+          // We never see the password itself now, only the value the client
+          // derived from it under the auth salt, so there is no password
+          // strength check to make here: that lives in the client, which is
+          // the only party that still holds the password.
+          if (!AUTH_SECRET_RE.test(String(b.authSecret || ""))) return json(res, 400, { error: "bad auth secret" });
           if (await store.getAccount(username)) return json(res, 409, { error: "handle already taken" });
-          await store.createAccount(username, await hashPassword(b.password));
+          await store.createAccount(username, await hashPassword(b.authSecret));
           counters.registered++;
           elog.add("info", "account registered", username);
           const token = crypto.randomBytes(32).toString("hex");
@@ -300,9 +334,9 @@ async function main() {
           const username = String(b.username || "").toLowerCase();
           if (lockedOut(res, username)) return;
           const acc = await store.getAccount(username);
-          if (!acc || !(await verifyPassword(String(b.password || ""), acc.pass))) {
+          if (!acc || !(await verifyAuth(acc, b))) {
             loginLockout.fail(username);
-            return json(res, 401, { error: "wrong handle or password" });
+            return authFailure(res, b);
           }
           if (acc.banned) return json(res, 403, { error: "account suspended" });
           loginLockout.succeed(username);
@@ -497,9 +531,9 @@ async function main() {
             const username = String(b.username || "").toLowerCase();
             if (lockedOut(res, username)) return;
             const acc = await store.getAccount(username);
-            if (!acc || !(await verifyPassword(String(b.password || ""), acc.pass))) {
+            if (!acc || !(await verifyAuth(acc, b))) {
               loginLockout.fail(username);
-              return json(res, 401, { error: "wrong handle or password" });
+              return authFailure(res, b);
             }
             if (acc.banned) return json(res, 403, { error: "account suspended" });
             if (!acc.is_admin) return json(res, 403, { error: "not an admin account" });

@@ -12,6 +12,7 @@ import { WebSocket } from "ws";
 import { makeBrowserNet, serializePacket, serializeCard, deserializeCard } from "../packages/net/src/serialize.js";
 import { generateIdentity, buildOutgoing, openIncoming } from "../packages/net/src/client.js";
 import { toB64, fromB64 } from "../packages/crypto/src/util.js";
+import { deriveAuthSecret } from "../packages/crypto/src/authsecret.js";
 
 const BASE = (process.env.SMOKE_URL || "http://localhost:8790").replace(/\/$/, "");
 const WS_BASE = BASE.replace(/^http/, "ws");
@@ -37,7 +38,9 @@ async function makeClient(handle) {
 
   // real account flow, same as the browser: register, then publish this
   // device's card under the session
-  const { token } = await api("/api/account/register", { username: handle, password: "smoke-" + run + "-pass" });
+  // Registration sends the derived auth secret, never the password itself.
+  const authSecret = await deriveAuthSecret("smoke-" + run + "-pass", handle);
+  const { token } = await api("/api/account/register", { username: handle, authSecret });
   await api("/api/account/device", { token, deviceId: crypto.randomBytes(8).toString("hex"), card: serializeCard(id.card) });
 
   const ws = new WebSocket(`${WS_BASE}/gateway`);
