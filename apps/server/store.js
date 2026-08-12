@@ -25,6 +25,11 @@ CREATE TABLE IF NOT EXISTS accounts (
   is_admin    BOOLEAN NOT NULL DEFAULT FALSE
 );
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE;
+-- Which secret the stored hash is over. 1: the raw password, as sent by
+-- clients before the auth secret and the blob key were separated. 2: the
+-- client-derived auth secret, which is all the server ever sees now. Existing
+-- rows default to 1 and move to 2 the next time that account signs in.
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS auth_ver SMALLINT NOT NULL DEFAULT 1;
 CREATE TABLE IF NOT EXISTS devices (
   device_id   TEXT PRIMARY KEY,
   username    TEXT NOT NULL REFERENCES accounts(username) ON DELETE CASCADE,
@@ -96,12 +101,18 @@ export async function openStore(databaseUrl, { mailboxTtlMs = 7 * 24 * 3600 * 10
     pool,
 
     // ---- accounts ----
-    async createAccount(username, passStr) {
-      await pool.query("INSERT INTO accounts(username,pass,created_at) VALUES($1,$2,$3)", [username, passStr, now()]);
+    async createAccount(username, passStr, authVer = 2) {
+      await pool.query("INSERT INTO accounts(username,pass,created_at,auth_ver) VALUES($1,$2,$3,$4)", [username, passStr, now(), authVer]);
     },
     async getAccount(username) {
-      const r = await pool.query("SELECT username,pass,banned,is_admin FROM accounts WHERE username=$1", [username]);
+      const r = await pool.query("SELECT username,pass,banned,is_admin,auth_ver FROM accounts WHERE username=$1", [username]);
       return r.rows[0] || null;
+    },
+    // Move an account off the old scheme once it has proved the password: the
+    // stored hash switches to being over the client-derived auth secret, and
+    // the raw password never reaches us again.
+    async upgradeAuth(username, passStr) {
+      await pool.query("UPDATE accounts SET pass=$2, auth_ver=2 WHERE username=$1", [username, passStr]);
     },
     async isAdmin(username) {
       const r = await pool.query("SELECT is_admin FROM accounts WHERE username=$1", [username]);

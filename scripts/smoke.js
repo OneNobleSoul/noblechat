@@ -12,14 +12,18 @@ import { WebSocket } from "ws";
 import { makeBrowserNet, serializePacket, serializeCard, deserializeCard } from "../packages/net/src/serialize.js";
 import { generateIdentity, buildOutgoing, openIncoming } from "../packages/net/src/client.js";
 import { toB64, fromB64 } from "../packages/crypto/src/util.js";
+import { deriveAuthSecret } from "../packages/crypto/src/authsecret.js";
 
 const BASE = (process.env.SMOKE_URL || "http://localhost:8790").replace(/\/$/, "");
 const WS_BASE = BASE.replace(/^http/, "ws");
 const run = Date.now().toString(36).slice(-6);
 
-async function api(path, body) {
-  const r = await fetch(`${BASE}${path}`, body === undefined ? {} : {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+async function api(path, body, token) {
+  const headers = {};
+  if (token) headers.Authorization = "Bearer " + token;
+  if (body !== undefined) headers["content-type"] = "application/json";
+  const r = await fetch(`${BASE}${path}`, body === undefined ? { headers } : {
+    method: "POST", headers, body: JSON.stringify(body),
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(`${path} -> ${r.status} ${j.error || ""}`);
@@ -34,7 +38,9 @@ async function makeClient(handle) {
 
   // real account flow, same as the browser: register, then publish this
   // device's card under the session
-  const { token } = await api("/api/account/register", { username: handle, password: "smoke-" + run + "-pass" });
+  // Registration sends the derived auth secret, never the password itself.
+  const authSecret = await deriveAuthSecret("smoke-" + run + "-pass", handle);
+  const { token } = await api("/api/account/register", { username: handle, authSecret });
   await api("/api/account/device", { token, deviceId: crypto.randomBytes(8).toString("hex"), card: serializeCard(id.card) });
 
   const ws = new WebSocket(`${WS_BASE}/gateway`);
@@ -49,9 +55,9 @@ async function makeClient(handle) {
   });
   ws.send(JSON.stringify({ t: "subscribe", token, provider: toB64(id.providerId), mailbox: toB64(id.mailbox) }));
   return {
-    id, net, ws, token,
+    id, net, ws, token, handle,
     async peerCard(toHandle) {
-      const { devices } = await api(`/api/bundle?handle=${toHandle}`);
+      const { devices } = await api(`/api/bundle?handle=${toHandle}`, undefined, token);
       return deserializeCard(devices[0]);
     },
     async send(toHandle, body) {
@@ -83,15 +89,27 @@ console.log("alice received:", JSON.stringify(got2.content));
 // file upload round-trip: opaque bytes in, identical bytes out
 const payload = new Uint8Array([1, 2, 3, 251, 252, 253]);
 const up = await fetch(`${BASE}/api/upload`, {
-  method: "POST", headers: { "content-type": "application/octet-stream", "x-file-type": "application/test", Authorization: "Bearer " + alice.token }, body: payload,
+  method: "POST", headers: { "content-type": "application/octet-stream", Authorization: "Bearer " + alice.token }, body: payload,
 });
 const { id: fileId } = await up.json();
-const down = new Uint8Array(await (await fetch(`${BASE}/api/file?id=${fileId}`)).arrayBuffer());
+const downRes = await fetch(`${BASE}/api/file?id=${fileId}`, { headers: { Authorization: "Bearer " + alice.token } });
+const down = new Uint8Array(await downRes.arrayBuffer());
 const fileOk = up.ok && down.length === payload.length && down.every((b, i) => b === payload[i]);
 console.log("file upload/download round-trip:", fileOk);
+// The media type must not come back from the server: it belongs in the
+// encrypted message, not in a header on an otherwise opaque blob.
+const mimeHidden = !downRes.headers.get("x-file-type");
+console.log("server does not echo a media type:", mimeHidden);
+
+// Both routes used to be open. Check they now turn away a caller with no
+// session, so this can't quietly regress.
+const anonBundle = await fetch(`${BASE}/api/bundle?handle=${alice.handle}`);
+const anonFile = await fetch(`${BASE}/api/file?id=${fileId}`);
+const anonBlocked = anonBundle.status === 401 && anonFile.status === 401;
+console.log("bundle and file reject anonymous callers:", anonBlocked);
 
 const ok = got.content.body === "hey bob, over the mixnet"
   && got2.content.body === "got it, fully encrypted"
-  && sigOk && noForge && fileOk;
+  && sigOk && noForge && fileOk && mimeHidden && anonBlocked;
 console.log(ok ? "SMOKE OK" : "SMOKE FAILED");
 process.exit(ok ? 0 : 1);

@@ -8,6 +8,7 @@ dist/
 apps/web/public/app.bundle.js
 apps/web/public/nym-transport.bundle.js
 apps/web/public/landing-gate.js
+apps/web/public/admin.js
 
 # local runtime data (sqlite)
 data/

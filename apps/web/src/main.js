@@ -9,10 +9,15 @@ import {
   serializeIdentity, deserializeIdentity,
 } from "../../../packages/net/src/serialize.js";
 import { toB64, fromB64, poissonDelay, keysFingerprint } from "../../../packages/crypto/src/util.js";
+import { deriveAuthSecret } from "../../../packages/crypto/src/authsecret.js";
 import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining, normalizeFile } from "./text-utils.js";
 import { parsePinsJson, pinsToObject, mergeSyncedPin } from "./pin-utils.js";
 import { reactionsAfterToggle, canUnsend, trimHistory, shouldStickToBottom } from "./message-utils.js";
 import { unlocks, isUnlocked, markUnlocked } from "./gate.js";
+import { putKey, getKey, clearKeys } from "./keystore.js";
+
+// Name the blob key is filed under in IndexedDB.
+const BLOB_KEY_NAME = "blob";
 
 const $ = (s) => document.querySelector(s);
 const K = { token: "noblechat:token", user: "noblechat:user", dev: "noblechat:deviceId", id: "noblechat:id", bkey: "noblechat:bkey", contacts: "noblechat:contacts", prefs: "noblechat:prefs", history: "noblechat:history", pins: "noblechat:pins" };
@@ -89,11 +94,20 @@ function beep() {
 // blobs written before the bump and migrate them (see decryptBlobMigrating).
 const PBKDF2_ITERS = 600000;
 const PBKDF2_LEGACY = 100000;
+// Derived non-extractable: the key can encrypt and decrypt, but its bytes
+// cannot be read back out - not by us, and not by anything that manages to run
+// script on this page. It is kept in IndexedDB as a key object rather than
+// exported into localStorage, which is where it used to sit next to the
+// session token, one XSS away from being posted somewhere.
 async function deriveBlobKey(password, username, iterations = PBKDF2_ITERS) {
   const enc = new TextEncoder();
   const base = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]);
-  return crypto.subtle.deriveKey({ name: "PBKDF2", salt: enc.encode("noblechat:" + username), iterations, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+  return crypto.subtle.deriveKey({ name: "PBKDF2", salt: enc.encode("noblechat:" + username), iterations, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
 }
+
+// deriveAuthSecret (what the server gets instead of the password) lives in
+// packages/crypto/src/authsecret.js, shared with the admin panel and the smoke
+// test. See the comment there for why the two salts must differ.
 // Decrypt a blob with the current key; if that fails and we hold a legacy
 // fallback key (only set on a fresh password login), try that too. Returns
 // { data, migrated } - migrated:true means the caller should re-encrypt the
@@ -105,8 +119,10 @@ async function decryptBlobMigrating(b64) {
     return { data: await decryptBlob(state.blobKeyLegacy, b64), migrated: true };
   }
 }
-async function exportKey(k) { return toB64(new Uint8Array(await crypto.subtle.exportKey("raw", k))); }
-async function importKey(b64) { return crypto.subtle.importKey("raw", fromB64(b64), { name: "AES-GCM" }, true, ["encrypt", "decrypt"]); }
+// Only used to take over a key left behind by an older build, which stored it
+// exported in localStorage. Imported non-extractable, so it stops being
+// readable the moment it is adopted.
+async function importLegacyKey(b64) { return crypto.subtle.importKey("raw", fromB64(b64), { name: "AES-GCM" }, false, ["encrypt", "decrypt"]); }
 async function encryptBlob(key, obj) { const iv = crypto.getRandomValues(new Uint8Array(12)); const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(JSON.stringify(obj)))); const out = new Uint8Array(iv.length + ct.length); out.set(iv); out.set(ct, iv.length); return toB64(out); }
 async function decryptBlob(key, b64) { const raw = fromB64(b64); const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: raw.slice(0, 12) }, key, raw.slice(12)); return JSON.parse(new TextDecoder().decode(pt)); }
 
@@ -130,18 +146,35 @@ function passGate() {
   });
 }
 
+// Fetch this device's blob key, adopting one left behind by an older build.
+// Those were exported to bytes and kept in localStorage; re-importing it
+// non-extractable and moving it into IndexedDB makes it unreadable from here
+// on, and the localStorage copy is removed so it stops being a liability.
+async function loadBlobKey() {
+  const stored = await getKey(BLOB_KEY_NAME);
+  if (stored) { ls.del(K.bkey); return stored; }
+  const legacy = ls.get(K.bkey);
+  if (!legacy) return null;
+  try {
+    const key = await importLegacyKey(legacy);
+    await putKey(BLOB_KEY_NAME, key);
+    ls.del(K.bkey);
+    return key;
+  } catch { ls.del(K.bkey); return null; }
+}
+
 // ---------- init / auto-login ----------
 async function init() {
   const { view, meanDelayMs } = await (await fetch("/api/net")).json();
   state.net = makeBrowserNet(view); state.meanDelayMs = meanDelayMs; buildNetViz();
   pollStatus(); if (!state.statusTimer) state.statusTimer = setInterval(pollStatus, 45000);
 
-  const token = ls.get(K.token), user = ls.get(K.user), idRaw = ls.get(K.id), dev = ls.get(K.dev), bkey = ls.get(K.bkey);
+  const token = ls.get(K.token), user = ls.get(K.user), idRaw = ls.get(K.id), dev = ls.get(K.dev);
   if (token && user && idRaw && dev) {
     try {
       state.token = token; state.user = user; state.deviceId = dev;
       state.identity = deserializeIdentity(JSON.parse(idRaw));
-      state.blobKey = bkey ? await importKey(bkey) : null;
+      state.blobKey = await loadBlobKey();
       if (!state.net.providers.some((p) => toB64(p.id) === toB64(state.identity.providerId))) throw new Error("stale-net");
       await registerDevice(); // 401 if the session expired
       await afterAuth();
@@ -157,6 +190,9 @@ async function init() {
 // (see doAuth), so the retained keypair is never reused across handles.
 function clearSession() {
   for (const k of Object.values(K)) if (k !== K.dev && k !== K.id) ls.del(k);
+  // The blob key lives in IndexedDB now, so clearing localStorage alone would
+  // leave it usable behind a signed-out screen.
+  clearKeys();
   state.token = state.user = state.identity = state.blobKey = state.blobKeyLegacy = null;
 }
 
@@ -185,13 +221,31 @@ async function doAuth() {
   const pass = $("#auth-pass").value;
   const err = $("#setup-err"); err.hidden = true;
   if (!/^[a-z0-9_]{3,24}$/.test(user)) { err.textContent = "Handle: 3-24 chars, a-z 0-9 _"; err.hidden = false; return; }
-  if (pass.length < 8) { err.textContent = "Password must be at least 8 characters."; err.hidden = false; return; }
+  // The server can't judge password strength any more - it never sees the
+  // password - so the minimum is enforced here, the only place that still
+  // holds it. New accounts must clear 12; sign-in stays at 8 so accounts
+  // created under the old minimum are not locked out of their own data.
+  const minLen = state.authMode === "register" ? 12 : 8;
+  if (pass.length < minLen) { err.textContent = `Password must be at least ${minLen} characters.`; err.hidden = false; return; }
   $("#auth-go").disabled = true;
 
   try {
     const ep = state.authMode === "register" ? "/api/account/register" : "/api/account/login";
-    const r = await fetch(ep, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: user, password: pass }) });
-    const j = await r.json().catch(() => ({}));
+    const authSecret = await deriveAuthSecret(pass, user);
+    const post = (body) => fetch(ep, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+    let r = await post({ username: user, authSecret });
+    let j = await r.json().catch(() => ({}));
+    // Accounts created before the split still have a hash over the raw
+    // password, so the server can't check an auth secret against them yet. It
+    // asks for one retry with the password, verifies that, and stores the auth
+    // secret from then on - a silent one-time upgrade, no password reset.
+    // The retry flag comes back on every failed sign-in, including for handles
+    // that don't exist, so it can't be used to tell which accounts are old.
+    if (!r.ok && j.retryLegacy) {
+      r = await post({ username: user, password: pass, authSecret });
+      j = await r.json().catch(() => ({}));
+    }
     if (!r.ok) throw new Error(j.error || "authentication failed");
 
     state.token = j.token; state.user = user;
@@ -213,7 +267,9 @@ async function doAuth() {
     }
     ls.set(K.dev, state.deviceId);
     state.identity = id;
-    state.blobKey = await deriveBlobKey(pass, user); ls.set(K.bkey, await exportKey(state.blobKey));
+    state.blobKey = await deriveBlobKey(pass, user);
+    await putKey(BLOB_KEY_NAME, state.blobKey);
+    ls.del(K.bkey); // in case an older build left an exported copy behind
     // We have the password here, so also derive the old-iteration key to open
     // and migrate any blobs written before the 600k bump. Auto-login (no
     // password) skips this: its cached key already matches its stored blobs.
@@ -288,8 +344,17 @@ function updateChatHeadPresence() {
 }
 
 // ---------- account bundle + contacts ----------
+// Bundle and attachment routes require a session now (they used to be open,
+// which made the first one a public user directory). The token goes in the
+// Authorization header, never the URL, so it stays out of proxy logs.
+function authFetch(url, opts = {}) {
+  return fetch(url, { ...opts, headers: { ...(opts.headers || {}), Authorization: "Bearer " + state.token } });
+}
+async function fetchBundleFor(handle) {
+  return authFetch("/api/bundle?handle=" + encodeURIComponent(handle));
+}
 async function loadMyBundle() {
-  try { const r = await fetch("/api/bundle?handle=" + encodeURIComponent(state.user)); if (r.ok) { const j = await r.json(); state.myBundle = (j.devices || []).map(deserializeCard); } } catch { /* */ }
+  try { const r = await fetchBundleFor(state.user); if (r.ok) { const j = await r.json(); state.myBundle = (j.devices || []).map(deserializeCard); } } catch { /* */ }
 }
 function loadContactsLocal() {
   try {
@@ -457,7 +522,7 @@ async function fetchBundle(handle, { silent = true, noSave = false } = {}) {
   if (handle === state.user) { if (!silent) toast("that's you"); return false; }
   if (state.blocked.has(handle)) { if (!silent) toast(`${handle} is blocked - unblock them first`); return false; }
   try {
-    const r = await fetch("/api/bundle?handle=" + encodeURIComponent(handle));
+    const r = await fetchBundleFor(handle);
     if (!r.ok) { if (!silent) toast("no such handle online"); return false; }
     const j = await r.json();
     const cards = (j.devices || []).map(deserializeCard);
@@ -527,7 +592,7 @@ async function verifySender(handle, verify) {
     // deliberately not fetchBundle(): a spoofed sender must not end up saved
     // as a contact as a side effect of the lookup
     try {
-      const r = await fetch("/api/bundle?handle=" + encodeURIComponent(handle));
+      const r = await fetchBundleFor(handle);
       if (r.ok) { const j = await r.json(); const cards = (j.devices || []).map(deserializeCard); checkPin(handle, cards); state.contacts.set(handle, cards); }
     } catch { /* offline: fall through, check() decides */ }
   }
@@ -794,7 +859,11 @@ async function sendFile(file, expireSec = 0) {
     const keyRaw = crypto.getRandomValues(new Uint8Array(32));
     const enc = await encryptFileChunked(keyRaw, file);
     const mime = fileMime(file);
-    const headers = { "content-type": "application/octet-stream", "x-file-type": mime, Authorization: "Bearer " + state.token };
+    // The media type is not sent alongside the ciphertext: it travels inside
+    // the encrypted message as fileMeta.mime below, which is where the reader
+    // takes it from. Handing it to the server too would have told it what kind
+    // of file each opaque blob is, for no benefit.
+    const headers = { "content-type": "application/octet-stream", Authorization: "Bearer " + state.token };
     if (expireSec > 0) headers["x-expire-sec"] = String(expireSec);
     const r = await fetch("/api/upload", { method: "POST", headers, body: enc });
     const j = await r.json().catch(() => ({}));
@@ -912,7 +981,7 @@ function renderContacts() {
       <button class="row-menu" data-menu="${esc(h)}" title="Options" aria-label="Options">⋮</button>
     </div>`;
   }
-  el.innerHTML = html || `<div class="net-note" style="padding:12px">No contacts yet. Add someone by their handle above.</div>`;
+  el.innerHTML = html || `<div class="net-note pad">No contacts yet. Add someone by their handle above.</div>`;
   el.querySelectorAll(".contact").forEach((n) => n.addEventListener("click", (e) => {
     if (e.target.closest(".row-menu")) return; // menu button handled separately
     setActive(n.dataset.h);
@@ -1099,7 +1168,7 @@ async function openAttachment(m, node) {
   if (!m || !m.file || node.dataset.loading) return;
   const f = m.file; node.dataset.loading = "1";
   try {
-    const r = await fetch(`/api/file?id=${encodeURIComponent(f.id)}`);
+    const r = await authFetch(`/api/file?id=${encodeURIComponent(f.id)}`);
     if (!r.ok) { toast("file no longer available"); return; }
     const buf = await r.arrayBuffer();
     const blob = f.enc === "c1"
@@ -1180,8 +1249,9 @@ function buildNetViz() {
   // an always-alive flow of packets streaming through the layers: mostly dim cover
   // traffic, so the panel keeps moving even when the mix reports no per-hop events
   html += '<div class="net-flow" aria-hidden="true">';
-  const delays = [0, 0.8, 1.6, 2.4, 3.2, 4.0];
-  for (const d of delays) html += `<span class="fd" style="animation-delay:${d}s;top:${13 + (d * 10 % 9)}px"></span>`;
+  // Stagger and vertical offset come from .fd-1..6 in style.css rather than an
+  // inline style attribute, so the CSP can forbid those outright.
+  for (let i = 1; i <= 6; i++) html += `<span class="fd fd-${i}"></span>`;
   html += "</div>";
   wrap.innerHTML = html;
   state.netCols = [...wrap.querySelectorAll(".net-node")];

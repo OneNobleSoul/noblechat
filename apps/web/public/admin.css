@@ -1,0 +1,50 @@
+:root{--bg:#06080c;--panel:#0d121b;--panel2:#111a26;--line:#1c2634;--text:#dbe4ee;--muted:#8695a8;--dim:#5c6a7d;--accent:#5eead4;--danger:#fb7185;--warn:#fbbf24;--ok:#4ade80;--mono:ui-monospace,Menlo,monospace;--sans:Inter,system-ui,sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh}
+a{color:var(--accent)}
+.wrap{max-width:960px;margin:0 auto;padding:28px 20px 60px}
+h1{font-family:var(--mono);font-size:20px;margin:0 0 2px}
+.sub{color:var(--dim);font-size:13px;margin:0 0 24px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:18px}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:1.4px;color:var(--dim);font-family:var(--mono);margin:0 0 14px}
+label{display:block;font-size:12px;color:var(--muted);margin:0 0 6px}
+input,textarea{width:100%;background:#080b11;border:1px solid var(--line);border-radius:9px;color:var(--text);padding:11px;font-size:14px;font-family:var(--sans);margin-bottom:12px}
+input:focus,textarea:focus{outline:none;border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.btn{background:linear-gradient(180deg,var(--accent),#2dd4bf);color:#04120f;border:0;padding:9px 16px;border-radius:9px;font-weight:600;font-size:13px;cursor:pointer}
+.btn.ghost{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
+.btn.danger{background:transparent;color:var(--danger);border:1px solid color-mix(in srgb,var(--danger) 45%,var(--line))}
+.btn.warn{background:transparent;color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 45%,var(--line))}
+.btn+.btn{margin-left:8px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.stat{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px}
+.stat b{display:block;font-size:22px;font-family:var(--mono)}
+.stat span{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:1px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line)}
+th{color:var(--dim);font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:1px}
+.pill{font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.pill.on{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,var(--line))}
+.pill.off{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 40%,var(--line))}
+.err{color:var(--danger);font-size:13px;font-family:var(--mono)}
+.lvl{font-family:var(--mono);font-size:11px;text-transform:uppercase}
+.lvl-info{color:var(--muted)}.lvl-warn{color:var(--warn)}.lvl-error{color:var(--danger)}
+.pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 40%,var(--line))}
+.pill.bad{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 45%,var(--line))}
+.btn.active{outline:2px solid var(--accent);outline-offset:1px}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.muted{color:var(--dim);font-size:12px}
+#login{max-width:400px;margin:12vh auto 0}
+.hidden{display:none}
+.tools .btn{font-size:12px;padding:6px 10px}
+
+/* Layout tweaks that used to be style="" attributes on individual elements,
+   moved here so the pages need no inline styles at all and the CSP can drop
+   'unsafe-inline'. */
+.or-token { margin: 16px 0 6px; }
+.row.spread { justify-content: space-between; align-items: flex-end; }
+.row.mb-10 { margin-bottom: 10px; }
+.row.mb-12 { margin-bottom: 12px; }
+.muted.mb-0 { margin-bottom: 0; }
+.row.inline-check { margin: 0; gap: 6px; color: var(--muted); font-size: 12px; }
+.row.inline-check input[type="checkbox"] { width: auto; margin: 0; }

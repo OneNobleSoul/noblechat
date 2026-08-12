@@ -5,8 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NobleChat</title>
 <meta name="description" content="Private messaging over a real mix network with hybrid post-quantum encryption.">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="/fonts.css" rel="stylesheet">
 <link rel="stylesheet" href="/style.css?v=__V__">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◆</text></svg>">
 <link rel="manifest" href="/manifest.webmanifest">
@@ -51,7 +50,7 @@
       <input id="auth-pass" type="password" placeholder="your password" autocomplete="current-password">
       <button id="auth-go" class="btn">Sign in</button>
       <p id="setup-err" class="err" hidden></p>
-      <p class="fine">Your message keys are generated on this device and never leave it. Your password protects your account and syncs your contacts end-to-end - the server only ever sees a hash.</p>
+      <p class="fine">Your message keys are generated on this device and never leave it. Your password never leaves it either: it stays here, and the server only ever receives a value derived from it that it can check but not reverse. Your contact list is encrypted under a separate key derived from the same password, which the server never sees in any form.</p>
     </div>
 
     <div id="keygen" class="keygen" hidden>

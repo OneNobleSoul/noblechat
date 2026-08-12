@@ -6,7 +6,111 @@ import {
   readBody, readBodyBuffer, timingEqual, originAllowed,
   hashPassword, verifyPassword, clampExpireSec,
   tryAcquireConn, releaseConn, staticRelPath,
+  clientIp, makeLockout, asHandle, asToken,
 } from "../apps/server/util.js";
+
+test("handle fields are type-checked, not coerced", () => {
+  assert.equal(asHandle("Kirito"), "kirito");
+  // String(["kirito"]) is "kirito", so an array used to walk straight through
+  // the handle check. Every non-string shape is rejected outright now.
+  assert.equal(asHandle(["kirito"]), null);
+  assert.equal(asHandle([["kirito"]]), null);
+  assert.equal(asHandle(["kirito", "extra"]), null);
+  assert.equal(asHandle(123), null);
+  assert.equal(asHandle({ $ne: null }), null);
+  assert.equal(asHandle(null), null);
+  assert.equal(asHandle(undefined), null);
+  assert.equal(asHandle("ab"), null, "still has to satisfy the handle format");
+  assert.equal(asHandle("has-dash"), null);
+});
+
+test("token fields must be plain bounded strings", () => {
+  assert.equal(asToken("abc123"), "abc123");
+  assert.equal(asToken(["abc123"]), null);
+  assert.equal(asToken(""), null);
+  assert.equal(asToken({}), null);
+  assert.equal(asToken("x".repeat(257)), null);
+  assert.equal(asToken("x".repeat(256)), "x".repeat(256));
+});
+
+const reqWith = (xff, remote = "10.0.0.1") => ({
+  headers: xff === null ? {} : { "x-forwarded-for": xff },
+  socket: { remoteAddress: remote },
+});
+
+test("clientIp takes the entry our own proxy appended, not the client's", () => {
+  // One proxy in front: it appends the address it saw, so the rightmost entry
+  // is the real caller and everything left of it is client-supplied noise.
+  assert.equal(clientIp(reqWith("203.0.113.9"), 1), "203.0.113.9");
+  assert.equal(clientIp(reqWith("1.2.3.4, 203.0.113.9"), 1), "203.0.113.9");
+  // The spoofing attempt that made the login throttle useless: a forged
+  // leftmost entry must not become the rate-limit key.
+  assert.notEqual(clientIp(reqWith("1.2.3.4, 203.0.113.9"), 1), "1.2.3.4");
+});
+
+test("clientIp counts trusted hops from the right", () => {
+  const xff = "1.2.3.4, 198.51.100.7, 192.0.2.5";
+  assert.equal(clientIp(reqWith(xff), 1), "192.0.2.5");
+  assert.equal(clientIp(reqWith(xff), 2), "198.51.100.7");
+});
+
+test("clientIp ignores the header without a trusted proxy, and when it is too short", () => {
+  assert.equal(clientIp(reqWith("1.2.3.4"), 0), "10.0.0.1");
+  // Two hops claimed but only one entry present: the chain is not what we
+  // expect, so trust the socket instead of a forgeable single entry.
+  assert.equal(clientIp(reqWith("1.2.3.4"), 2), "10.0.0.1");
+  assert.equal(clientIp(reqWith(null), 1), "10.0.0.1");
+  assert.equal(clientIp(reqWith("  ,  "), 1), "10.0.0.1");
+});
+
+test("lockout stays quiet until the threshold, then backs off exponentially", () => {
+  const lo = makeLockout({ threshold: 3, baseDelayMs: 1000, maxDelayMs: 60000 });
+  const now = 1_000_000;
+  for (let i = 0; i < 2; i++) lo.fail("kirito", now);
+  assert.equal(lo.retryAfter("kirito", now), 0, "a couple of typos must not lock anyone out");
+  lo.fail("kirito", now); // 3rd -> 1s
+  assert.equal(lo.retryAfter("kirito", now), 1);
+  lo.fail("kirito", now); // 4th -> 2s
+  assert.equal(lo.retryAfter("kirito", now), 2);
+  lo.fail("kirito", now); // 5th -> 4s
+  assert.equal(lo.retryAfter("kirito", now), 4);
+});
+
+test("lockout expires, is capped, and a correct password clears it", () => {
+  const lo = makeLockout({ threshold: 1, baseDelayMs: 1000, maxDelayMs: 5000 });
+  const now = 1_000_000;
+  for (let i = 0; i < 10; i++) lo.fail("kirito", now);
+  assert.equal(lo.retryAfter("kirito", now), 5, "backoff must not grow past the cap");
+  assert.equal(lo.retryAfter("kirito", now + 5001), 0, "and must expire on its own");
+
+  lo.fail("asuna", now);
+  assert.ok(lo.retryAfter("asuna", now) > 0);
+  lo.succeed("asuna");
+  assert.equal(lo.retryAfter("asuna", now), 0);
+});
+
+test("waiting out a lock does not hand back a fresh batch of free guesses", () => {
+  const lo = makeLockout({ threshold: 3, baseDelayMs: 1000, maxDelayMs: 60000, forgetAfterMs: 3600_000 });
+  let now = 1_000_000;
+  for (let i = 0; i < 3; i++) lo.fail("kirito", now);
+  assert.equal(lo.retryAfter("kirito", now), 1);
+  now += 2000; // sit out the delay
+  assert.equal(lo.retryAfter("kirito", now), 0, "the lock itself must lapse");
+  // ...but the next failure continues the escalation instead of starting over.
+  lo.fail("kirito", now);
+  assert.equal(lo.retryAfter("kirito", now), 2);
+  // Only a long quiet period forgets the history entirely.
+  assert.equal(lo.retryAfter("kirito", now + 3600_001), 0);
+  lo.fail("kirito", now + 3600_001);
+  assert.equal(lo.retryAfter("kirito", now + 3600_001), 0, "history forgotten, back below the threshold");
+});
+
+test("lockout does not grow without bound", () => {
+  const lo = makeLockout({ threshold: 1, baseDelayMs: 1000, maxEntries: 50 });
+  const now = 1_000_000;
+  for (let i = 0; i < 500; i++) lo.fail("handle" + i, now);
+  assert.ok(lo.size() <= 50, `expected the map to stay capped, got ${lo.size()}`);
+});
 
 test("handle format matches what the account routes accept", () => {
   assert.ok(HANDLE_RE.test("kirito"));

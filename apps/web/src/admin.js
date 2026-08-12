@@ -1,5 +1,11 @@
 // NobleChat admin panel logic. Talks to /api/admin/* with a Bearer token kept
 // only in this tab's sessionStorage.
+//
+// Bundled from here into public/admin.js (it used to be a plain file in
+// public/) so it can share the auth secret derivation with the chat client
+// instead of carrying its own copy of the KDF.
+import { deriveAuthSecret } from "../../../packages/crypto/src/authsecret.js";
+
 const $ = (s) => document.querySelector(s);
 const TOKEN_KEY = "nc-admin-token";
 let token = sessionStorage.getItem(TOKEN_KEY) || "";
@@ -24,8 +30,18 @@ async function signIn(t) {
 async function signInAccount(username, password) {
   $("#login-err").classList.add("hidden");
   try {
-    const res = await fetch("/api/admin/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username, password }) });
-    const d = await res.json().catch(() => ({}));
+    const handle = String(username || "").toLowerCase();
+    const authSecret = await deriveAuthSecret(password, handle);
+    const post = (body) => fetch("/api/admin/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    // Same one-time upgrade path as the chat client: an account still on the
+    // old scheme gets asked for the password once, and is stored under the
+    // derived auth secret from then on.
+    let res = await post({ username: handle, authSecret });
+    let d = await res.json().catch(() => ({}));
+    if (!res.ok && d.retryLegacy) {
+      res = await post({ username: handle, password, authSecret });
+      d = await res.json().catch(() => ({}));
+    }
     if (!res.ok || !d.token) { $("#login-err").textContent = d.error || "Invalid credentials."; $("#login-err").classList.remove("hidden"); return; }
     await signIn(d.token);
   } catch { $("#login-err").classList.remove("hidden"); }

@@ -21,7 +21,7 @@ import { createLog } from "./log.js";
 import { isTransport } from "./transport.js";
 import { connectNym } from "./nym.js";
 import { turnIceServers } from "./turn.js";
-import { HANDLE_RE, HEX_RE, isB64, validCard, readBody, streamToFile, json, timingEqual, originAllowed, hashPassword, verifyPassword, clampExpireSec, tryAcquireConn, releaseConn, staticRelPath } from "./util.js";
+import { HANDLE_RE, HEX_RE, AUTH_SECRET_RE, asHandle, asToken, isB64, validCard, readBody, streamToFile, json, timingEqual, originAllowed, hashPassword, verifyPassword, clampExpireSec, tryAcquireConn, releaseConn, staticRelPath, clientIp, makeLockout } from "./util.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.resolve(__dirname, "../web/public");
@@ -63,6 +63,12 @@ const CFG = {
   // needed when the browser page is served from a different host than the
   // gateway. Comma-separated, e.g. "https://chat.example.com".
   allowedOrigins: (process.env.ALLOWED_ORIGINS || "").split(",").map((s) => s.trim()).filter(Boolean),
+  // How many reverse proxies of our own sit in front of this process. Every
+  // per-IP limit here is only as trustworthy as this number: see clientIp() in
+  // util.js for why the leftmost X-Forwarded-For entry must never be used.
+  // 1 matches the default deployment (Caddy in front). Set 0 when the gateway
+  // is exposed directly, or 2 when a CDN fronts Caddy.
+  trustedProxyHops: Number(process.env.TRUSTED_PROXY_HOPS ?? 1),
 };
 
 function computeVersion() {
@@ -71,7 +77,7 @@ function computeVersion() {
   // because the ?v= query never moved).
   try {
     const h = crypto.createHash("sha256");
-    for (const f of ["app.bundle.js", "style.css", "landing-gate.js"]) {
+    for (const f of ["app.bundle.js", "style.css", "landing-gate.js", "admin.js", "fonts.css", "admin.css", "index.css", "info.css", "privacy.css", "imprint.css"]) {
       try { h.update(fs.readFileSync(path.join(PUBLIC, f))); } catch { /* */ }
     }
     return h.digest("hex").slice(0, 12);
@@ -82,16 +88,42 @@ const APP_VERSION = process.env.APP_VERSION || computeVersion();
 const MIME = {
   ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml",
   ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png", ".ico": "image/x-icon",
+  // Needed for the self-hosted fonts: with nosniff set, a font served as
+  // application/octet-stream is refused by the browser and the page silently
+  // falls back to a system face.
+  ".woff2": "font/woff2",
+  // RFC 9116 wants security.txt served as text/plain; without this it would go
+  // out as octet-stream and prompt a download instead of showing.
+  ".txt": "text/plain; charset=utf-8",
 };
+// Where the page is allowed to send data.
+//
+// This used to end in a blanket `https:`, which meant any injected script had
+// a ready-made exfiltration channel to any host on the internet - undoing much
+// of what the rest of this policy buys. The wildcard exists only for the nym
+// transport: its WASM client picks validators and gateways at runtime, so
+// their hostnames genuinely aren't known here.
+//
+// So it is only granted when that transport is actually wired up. A deployment
+// without a nym sidecar - the default - gets 'self' and nothing else. Where it
+// is in use, NYM_CONNECT_SRC narrows the wildcard to the specific hosts of a
+// known validator set.
+function connectSrc() {
+  const base = ["'self'"];
+  if (!CFG.nymClientUrl) return base.join(" ");
+  const configured = (process.env.NYM_CONNECT_SRC || "").split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+  return base.concat(configured.length ? configured : ["https:", "wss:"]).join(" ");
+}
 const CSP = [
   "default-src 'self'", "base-uri 'self'", "object-src 'none'", "frame-ancestors 'none'",
-  "img-src 'self' data: blob:", "media-src 'self' blob:", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src 'self' https://fonts.gstatic.com",
+  "img-src 'self' data: blob:", "media-src 'self' blob:",
+  // Fonts are served from here, so no third-party style or font origin is
+  // needed and no visitor's address is handed to a font CDN.
+  "style-src 'self'", "font-src 'self'",
   // 'wasm-unsafe-eval' lets the lazily-loaded nym transport instantiate its
   // WebAssembly mix client; it does not permit JS eval.
   "script-src 'self' 'wasm-unsafe-eval'",
-  // https: for the nym validator API and gateways the WASM client dials.
-  "connect-src 'self' ws: wss: https:", "manifest-src 'self'",
+  `connect-src ${connectSrc()}`, "manifest-src 'self'",
   // blob: for the nym SDK's web worker.
   "worker-src 'self' blob:", "child-src 'self' blob:",
 ].join("; ");
@@ -103,7 +135,6 @@ function setSecurityHeaders(res) {
   res.setHeader("Permissions-Policy", "camera=(self), microphone=(self), geolocation=(), payment=()");
   res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
 }
-function clientIp(req) { const xff = req.headers["x-forwarded-for"]; if (xff) return String(xff).split(",")[0].trim(); return (req.socket && req.socket.remoteAddress) || "unknown"; }
 function rateLimiter({ capacity, refillPerSec }) {
   const buckets = new Map();
   setInterval(() => { const now = Date.now(); for (const [k, b] of buckets) if (now - b.last > 600000) buckets.delete(k); }, 300000).unref();
@@ -187,7 +218,54 @@ async function main() {
 
   const httpLimit = rateLimiter({ capacity: 60, refillPerSec: 10 });
   const authLimit = rateLimiter({ capacity: 10, refillPerSec: 0.5 }); // login/register brute-force guard
+  // Per-handle backoff on top of the per-IP bucket above. The bucket alone only
+  // slows one address down; an attacker spread across many addresses would keep
+  // a full allowance per address while pounding a single account. Keyed on the
+  // submitted handle whether or not it exists, so it never reveals which is which.
+  // Threshold sits at 8 rather than 5 because a legacy account's first sign-in
+  // legitimately costs two attempts (auth secret, then the one-time password
+  // retry). Guessing is expensive for the attacker regardless: every candidate
+  // needs its own 600k-iteration derivation before it can even be submitted.
+  const loginLockout = makeLockout({ threshold: 8, baseDelayMs: 2000, maxDelayMs: 15 * 60 * 1000 });
+  // Check a sign-in against whichever scheme this account is on, upgrading it
+  // to the new one when an old account proves its password.
+  async function verifyAuth(acc, b) {
+    if (acc.auth_ver >= 2) {
+      const secret = String(b.authSecret || "");
+      if (!AUTH_SECRET_RE.test(secret)) return false;
+      return await verifyPassword(secret, acc.pass);
+    }
+    // Pre-split account: the stored hash is over the raw password, so that is
+    // the only thing we can check it against.
+    if (typeof b.password !== "string" || !b.password) return false;
+    if (!(await verifyPassword(b.password, acc.pass))) return false;
+    if (AUTH_SECRET_RE.test(String(b.authSecret || ""))) {
+      await store.upgradeAuth(acc.username, await hashPassword(String(b.authSecret)));
+      elog.add("info", "auth upgraded", acc.username);
+    }
+    return true;
+  }
+  // A failed sign-in that carried no password gets told to retry the old way.
+  // Sent on every such failure, including for handles that do not exist, so it
+  // never doubles as an "this account is old" oracle.
+  const authFailure = (res, b) => {
+    const body = { error: "wrong handle or password" };
+    if (typeof b.password !== "string") body.retryLegacy = true;
+    return json(res, 401, body);
+  };
+  // Reject an attempt that is currently backed off. Returns true when it has
+  // already answered the request.
+  const lockedOut = (res, handle) => {
+    const wait = loginLockout.retryAfter(handle);
+    if (!wait) return false;
+    res.setHeader("Retry-After", String(wait));
+    json(res, 429, { error: "too many attempts, try again later" });
+    return true;
+  };
   const submitLimit = rateLimiter({ capacity: 120, refillPerSec: 40 });
+  // Handle lookups, budgeted per account rather than per address: adding
+  // contacts is bursty but nobody legitimately walks thousands of handles.
+  const lookupLimit = rateLimiter({ capacity: 60, refillPerSec: 0.5 });
 
   // Admin access is granted two ways: the shared ADMIN_TOKEN (bootstrap / owner)
   // or a session token belonging to an account flagged is_admin. The latter lets
@@ -227,6 +305,9 @@ async function main() {
         data = Buffer.from(data.toString("utf8").replace(/__V__/g, APP_VERSION));
       }
       if (noCache) headers["Cache-Control"] = "no-cache";
+      // Font files carry their weight and subset in the filename, so a changed
+      // font is a changed URL and these can be cached hard.
+      else if (path.extname(file) === ".woff2") headers["Cache-Control"] = "public, max-age=31536000, immutable";
       res.writeHead(200, headers);
       res.end(data);
     });
@@ -235,7 +316,7 @@ async function main() {
   const server = http.createServer(async (req, res) => {
     setSecurityHeaders(res);
     const url = new URL(req.url, "http://x");
-    const ip = clientIp(req);
+    const ip = clientIp(req, CFG.trustedProxyHops);
     try {
       if (url.pathname === "/healthz") { res.writeHead(200).end("ok"); return; }
       if (url.pathname === "/readyz") { try { await store.stats(); res.writeHead(200).end("ready"); } catch { res.writeHead(503).end("not ready"); } return; }
@@ -259,11 +340,15 @@ async function main() {
         if (!authLimit(ip)) return json(res, 429, { error: "too many attempts" });
         try {
           const b = JSON.parse(await readBody(req, CFG.maxBodyBytes));
-          const username = String(b.username || "").toLowerCase();
-          if (!HANDLE_RE.test(username)) return json(res, 400, { error: "handle must be 3-24 chars: a-z 0-9 _" });
-          if (typeof b.password !== "string" || b.password.length < 8) return json(res, 400, { error: "password too short (min 8)" });
+          const username = asHandle(b.username);
+          if (!username) return json(res, 400, { error: "handle must be 3-24 chars: a-z 0-9 _" });
+          // We never see the password itself now, only the value the client
+          // derived from it under the auth salt, so there is no password
+          // strength check to make here: that lives in the client, which is
+          // the only party that still holds the password.
+          if (!AUTH_SECRET_RE.test(String(b.authSecret || ""))) return json(res, 400, { error: "bad auth secret" });
           if (await store.getAccount(username)) return json(res, 409, { error: "handle already taken" });
-          await store.createAccount(username, await hashPassword(b.password));
+          await store.createAccount(username, await hashPassword(b.authSecret));
           counters.registered++;
           elog.add("info", "account registered", username);
           const token = crypto.randomBytes(32).toString("hex");
@@ -275,10 +360,16 @@ async function main() {
         if (!authLimit(ip)) return json(res, 429, { error: "too many attempts" });
         try {
           const b = JSON.parse(await readBody(req, CFG.maxBodyBytes));
-          const username = String(b.username || "").toLowerCase();
+          const username = asHandle(b.username);
+          if (!username) return json(res, 401, { error: "wrong handle or password" });
+          if (lockedOut(res, username)) return;
           const acc = await store.getAccount(username);
-          if (!acc || !(await verifyPassword(String(b.password || ""), acc.pass))) return json(res, 401, { error: "wrong handle or password" });
+          if (!acc || !(await verifyAuth(acc, b))) {
+            loginLockout.fail(username);
+            return authFailure(res, b);
+          }
           if (acc.banned) return json(res, 403, { error: "account suspended" });
+          loginLockout.succeed(username);
           counters.logins++;
           const token = crypto.randomBytes(32).toString("hex");
           await store.createSession(token, username, CFG.sessionTtlMs);
@@ -286,14 +377,14 @@ async function main() {
         } catch (e) { return json(res, 400, { error: "bad request" }); }
       }
       if (url.pathname === "/api/account/logout" && req.method === "POST") {
-        try { const b = JSON.parse(await readBody(req, CFG.maxBodyBytes)); await store.deleteSession(String(b.token || "")); } catch { /* */ }
+        try { const b = JSON.parse(await readBody(req, CFG.maxBodyBytes)); const t = asToken(b.token); if (t) await store.deleteSession(t); } catch { /* */ }
         return json(res, 200, { ok: true });
       }
       if (url.pathname === "/api/account/device" && req.method === "POST") {
         if (!httpLimit(ip, 2)) return json(res, 429, { error: "rate limited" });
         try {
           const b = JSON.parse(await readBody(req, CFG.maxBodyBytes));
-          const username = await sessionUser(b.token);
+          const username = await sessionUser(asToken(b.token));
           if (!username) return json(res, 401, { error: "not signed in" });
           if (await store.isBanned(username)) return json(res, 403, { error: "account suspended" });
           if (typeof b.deviceId !== "string" || !HEX_RE.test(b.deviceId)) return json(res, 400, { error: "bad device id" });
@@ -312,7 +403,7 @@ async function main() {
         if (!httpLimit(ip, 2)) return json(res, 429, { error: "rate limited" });
         try {
           const b = JSON.parse(await readBody(req, CFG.maxBodyBytes));
-          const username = await sessionUser(b.token);
+          const username = await sessionUser(asToken(b.token));
           if (!username) return json(res, 401, { error: "not signed in" });
           if (typeof b.deviceId !== "string" || !HEX_RE.test(b.deviceId)) return json(res, 400, { error: "bad device id" });
           const mbk = await store.clearOtherDevices(username, b.deviceId);
@@ -320,12 +411,24 @@ async function main() {
           return json(res, 200, { ok: true, removed: mbk.length });
         } catch (e) { return json(res, 400, { error: "bad request" }); }
       }
+      // Public key material for a handle. Signed-in callers only: unauthenticated
+      // this was a user directory. It answers 200-with-bundle for a handle that
+      // exists and 404 for one that doesn't, and the bundle carries the mailbox
+      // id, the provider id and the device count. Anyone could therefore walk
+      // the handle namespace to map the user base, link mailbox ids (which are
+      // meant to be unlinkable to an observer) back to handles, and watch a
+      // given account's device count change over time.
       if (url.pathname === "/api/bundle") {
         if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" });
+        const me = await sessionUser(sessionToken(req));
+        if (!me) return json(res, 401, { error: "not signed in" });
+        // Per-account budget on top of the per-IP one, so a single signed-in
+        // account still can't enumerate the namespace wholesale.
+        if (!lookupLimit(me)) return json(res, 429, { error: "too many lookups" });
         const handle = (url.searchParams.get("handle") || "").toLowerCase();
-        if (!HANDLE_RE.test(handle)) { res.writeHead(400).end("{}"); return; }
+        if (!HANDLE_RE.test(handle)) return json(res, 400, { error: "bad handle" });
         const devices = await store.deviceBundle(handle);
-        if (!devices.length) { res.writeHead(404).end("{}"); return; }
+        if (!devices.length) return json(res, 404, { error: "not found" });
         return json(res, 200, { handle, devices });
       }
       // Presence: a handle is "online" if any of its devices currently holds a
@@ -365,7 +468,13 @@ async function main() {
         const username = await sessionUser(sessionToken(req));
         if (!username) return json(res, 401, { error: "not signed in" });
         if (await store.isBanned(username)) return json(res, 403, { error: "account suspended" });
-        const mime = String(req.headers["x-file-type"] || "application/octet-stream").slice(0, 100);
+        // The media type is NOT taken from the client any more. It used to be
+        // stored verbatim from the x-file-type header, which meant the one
+        // readable thing about an otherwise opaque attachment ("this is a PDF",
+        // "this is a voice message") sat in the clear in our database. Nothing
+        // ever read it back: the client takes the media type from the encrypted
+        // message body, not from the download response.
+        const mime = "application/octet-stream";
         // Optional auto-delete: the client sends how many seconds the ciphertext
         // should live. Clamp to <= 30 days; 0/absent means keep for the usual TTL.
         const expSec = clampExpireSec(req.headers["x-expire-sec"], 30 * 24 * 3600);
@@ -386,13 +495,21 @@ async function main() {
         catch { await fs.promises.unlink(store.filePath(id)).catch(() => {}); return json(res, 500, { error: "store failed" }); }
         return json(res, 200, { id });
       }
+      // Attachment download. Signed-in callers only: the ciphertext is useless
+      // without the per-file key that travels inside the end-to-end message,
+      // but an id that leaks (a log line, a forwarded transcript, a scraped
+      // backup) otherwise granted permanent anonymous access to the exact
+      // ciphertext length, which fingerprints known files.
       if (url.pathname === "/api/file") {
         if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" });
+        if (!(await sessionUser(sessionToken(req)))) return json(res, 401, { error: "not signed in" });
         const id = String(url.searchParams.get("id") || "");
         if (!/^[a-f0-9]{36}$/.test(id)) { res.writeHead(400).end(); return; }
         const f = await store.getFile(id);
         if (!f) { res.writeHead(404).end(); return; }
-        const headers = { "content-type": "application/octet-stream", "x-file-type": f.mime, "Cache-Control": "private, max-age=86400" };
+        // No x-file-type here any more: see the upload route. The real media
+        // type rides inside the encrypted message and is what the client uses.
+        const headers = { "content-type": "application/octet-stream", "Cache-Control": "private, max-age=86400" };
         if (f.data) { res.writeHead(200, headers); res.end(f.data); return; } // legacy row: bytes still in the DB
         const rs = fs.createReadStream(store.filePath(id));
         rs.on("open", () => {
@@ -426,9 +543,17 @@ async function main() {
           if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" });
           try {
             const b = JSON.parse(await readBody(req, CFG.maxBlobBytes));
-            const username = await sessionUser(b.token);
+            const username = await sessionUser(asToken(b.token));
             if (!username) return json(res, 401, { error: "not signed in" });
-            await store.setBlob(username, String(b.blob || "").slice(0, CFG.maxBlobBytes));
+            // The blob is opaque to us, but "opaque" is not "anything at all":
+            // it is base64 ciphertext, so check the shape and the size rather
+            // than coercing whatever turned up and truncating it. Silently
+            // storing a truncated blob would leave the account with contacts
+            // it can no longer decrypt.
+            const blob = b.blob;
+            if (typeof blob !== "string" || blob.length > CFG.maxBlobBytes) return json(res, 400, { error: "bad blob" });
+            if (blob && !/^[A-Za-z0-9+/=]+$/.test(blob)) return json(res, 400, { error: "bad blob" });
+            await store.setBlob(username, blob);
             return json(res, 200, { ok: true });
           } catch (e) { return json(res, 400, { error: "bad request" }); }
         }
@@ -441,11 +566,17 @@ async function main() {
           if (!authLimit(ip)) return json(res, 429, { error: "too many attempts" });
           try {
             const b = JSON.parse(await readBody(req, CFG.maxBodyBytes));
-            const username = String(b.username || "").toLowerCase();
+            const username = asHandle(b.username);
+            if (!username) return json(res, 401, { error: "wrong handle or password" });
+            if (lockedOut(res, username)) return;
             const acc = await store.getAccount(username);
-            if (!acc || !(await verifyPassword(String(b.password || ""), acc.pass))) return json(res, 401, { error: "wrong handle or password" });
+            if (!acc || !(await verifyAuth(acc, b))) {
+              loginLockout.fail(username);
+              return authFailure(res, b);
+            }
             if (acc.banned) return json(res, 403, { error: "account suspended" });
             if (!acc.is_admin) return json(res, 403, { error: "not an admin account" });
+            loginLockout.succeed(username);
             const token = crypto.randomBytes(32).toString("hex");
             await store.createSession(token, username, CFG.sessionTtlMs);
             elog.add("info", "admin signed in", username);
@@ -490,7 +621,7 @@ async function main() {
         }
         if (req.method === "POST") {
           const body = JSON.parse((await readBody(req, CFG.maxBodyBytes)) || "{}");
-          const handle = String(body.handle || body.username || "").toLowerCase();
+          const handle = asHandle(body.handle) || asHandle(body.username) || "";
           if (url.pathname === "/api/admin/announce") { live.announcement = String(body.text || "").slice(0, 500); await store.setSetting("announcement", live.announcement); elog.add("info", live.announcement ? "announcement published" : "announcement cleared"); broadcastStatus(); return json(res, 200, { ok: true }); }
           if (url.pathname === "/api/admin/maintenance") { live.maintenance = !!body.on; live.maintenanceMsg = String(body.message || "").slice(0, 500); await store.setSetting("maintenance", live.maintenance ? "on" : "off"); await store.setSetting("maintenance_msg", live.maintenanceMsg); elog.add("warn", "maintenance " + (live.maintenance ? "enabled" : "disabled")); broadcastStatus(); return json(res, 200, { ok: true, maintenance: live.maintenance }); }
           if (url.pathname === "/api/admin/transport") {
@@ -529,7 +660,7 @@ async function main() {
     // A browser always sends Origin on a WS handshake; reject cross-origin ones
     // so a malicious page can't open a gateway socket in a visitor's browser.
     if (!originAllowed(req.headers.origin, req.headers.host, CFG.allowedOrigins)) { ws.close(4008, "forbidden origin"); return; }
-    const ip = clientIp(req);
+    const ip = clientIp(req, CFG.trustedProxyHops);
     if (!tryAcquireConn(connPerIp, ip, CFG.maxConnPerIp)) { ws.close(1013, "too many connections"); return; }
     sockets.add(ws);
     let unsub = null; let myMbkey = null;
@@ -557,7 +688,7 @@ async function main() {
         // absorb every future delivery. You may only listen on a mailbox that
         // belongs to one of your own account's devices.
         (async () => {
-          const username = await sessionUser(m.token);
+          const username = await sessionUser(asToken(m.token));
           if (!username) { try { ws.close(4001, "unauthorized"); } catch { /* */ } return; }
           const owned = await store.deviceMbkeys(username);
           if (!owned.includes(mbkey)) { try { ws.close(4001, "forbidden mailbox"); } catch { /* */ } return; }
