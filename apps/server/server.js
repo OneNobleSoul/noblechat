@@ -21,7 +21,7 @@ import { createLog } from "./log.js";
 import { isTransport } from "./transport.js";
 import { connectNym } from "./nym.js";
 import { turnIceServers } from "./turn.js";
-import { HANDLE_RE, HEX_RE, AUTH_SECRET_RE, isB64, validCard, readBody, streamToFile, json, timingEqual, originAllowed, hashPassword, verifyPassword, clampExpireSec, tryAcquireConn, releaseConn, staticRelPath, clientIp, makeLockout } from "./util.js";
+import { HANDLE_RE, HEX_RE, AUTH_SECRET_RE, asHandle, asToken, isB64, validCard, readBody, streamToFile, json, timingEqual, originAllowed, hashPassword, verifyPassword, clampExpireSec, tryAcquireConn, releaseConn, staticRelPath, clientIp, makeLockout } from "./util.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.resolve(__dirname, "../web/public");
@@ -92,6 +92,9 @@ const MIME = {
   // application/octet-stream is refused by the browser and the page silently
   // falls back to a system face.
   ".woff2": "font/woff2",
+  // RFC 9116 wants security.txt served as text/plain; without this it would go
+  // out as octet-stream and prompt a download instead of showing.
+  ".txt": "text/plain; charset=utf-8",
 };
 // Where the page is allowed to send data.
 //
@@ -337,8 +340,8 @@ async function main() {
         if (!authLimit(ip)) return json(res, 429, { error: "too many attempts" });
         try {
           const b = JSON.parse(await readBody(req, CFG.maxBodyBytes));
-          const username = String(b.username || "").toLowerCase();
-          if (!HANDLE_RE.test(username)) return json(res, 400, { error: "handle must be 3-24 chars: a-z 0-9 _" });
+          const username = asHandle(b.username);
+          if (!username) return json(res, 400, { error: "handle must be 3-24 chars: a-z 0-9 _" });
           // We never see the password itself now, only the value the client
           // derived from it under the auth salt, so there is no password
           // strength check to make here: that lives in the client, which is
@@ -357,7 +360,8 @@ async function main() {
         if (!authLimit(ip)) return json(res, 429, { error: "too many attempts" });
         try {
           const b = JSON.parse(await readBody(req, CFG.maxBodyBytes));
-          const username = String(b.username || "").toLowerCase();
+          const username = asHandle(b.username);
+          if (!username) return json(res, 401, { error: "wrong handle or password" });
           if (lockedOut(res, username)) return;
           const acc = await store.getAccount(username);
           if (!acc || !(await verifyAuth(acc, b))) {
@@ -373,14 +377,14 @@ async function main() {
         } catch (e) { return json(res, 400, { error: "bad request" }); }
       }
       if (url.pathname === "/api/account/logout" && req.method === "POST") {
-        try { const b = JSON.parse(await readBody(req, CFG.maxBodyBytes)); await store.deleteSession(String(b.token || "")); } catch { /* */ }
+        try { const b = JSON.parse(await readBody(req, CFG.maxBodyBytes)); const t = asToken(b.token); if (t) await store.deleteSession(t); } catch { /* */ }
         return json(res, 200, { ok: true });
       }
       if (url.pathname === "/api/account/device" && req.method === "POST") {
         if (!httpLimit(ip, 2)) return json(res, 429, { error: "rate limited" });
         try {
           const b = JSON.parse(await readBody(req, CFG.maxBodyBytes));
-          const username = await sessionUser(b.token);
+          const username = await sessionUser(asToken(b.token));
           if (!username) return json(res, 401, { error: "not signed in" });
           if (await store.isBanned(username)) return json(res, 403, { error: "account suspended" });
           if (typeof b.deviceId !== "string" || !HEX_RE.test(b.deviceId)) return json(res, 400, { error: "bad device id" });
@@ -399,7 +403,7 @@ async function main() {
         if (!httpLimit(ip, 2)) return json(res, 429, { error: "rate limited" });
         try {
           const b = JSON.parse(await readBody(req, CFG.maxBodyBytes));
-          const username = await sessionUser(b.token);
+          const username = await sessionUser(asToken(b.token));
           if (!username) return json(res, 401, { error: "not signed in" });
           if (typeof b.deviceId !== "string" || !HEX_RE.test(b.deviceId)) return json(res, 400, { error: "bad device id" });
           const mbk = await store.clearOtherDevices(username, b.deviceId);
@@ -539,9 +543,17 @@ async function main() {
           if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" });
           try {
             const b = JSON.parse(await readBody(req, CFG.maxBlobBytes));
-            const username = await sessionUser(b.token);
+            const username = await sessionUser(asToken(b.token));
             if (!username) return json(res, 401, { error: "not signed in" });
-            await store.setBlob(username, String(b.blob || "").slice(0, CFG.maxBlobBytes));
+            // The blob is opaque to us, but "opaque" is not "anything at all":
+            // it is base64 ciphertext, so check the shape and the size rather
+            // than coercing whatever turned up and truncating it. Silently
+            // storing a truncated blob would leave the account with contacts
+            // it can no longer decrypt.
+            const blob = b.blob;
+            if (typeof blob !== "string" || blob.length > CFG.maxBlobBytes) return json(res, 400, { error: "bad blob" });
+            if (blob && !/^[A-Za-z0-9+/=]+$/.test(blob)) return json(res, 400, { error: "bad blob" });
+            await store.setBlob(username, blob);
             return json(res, 200, { ok: true });
           } catch (e) { return json(res, 400, { error: "bad request" }); }
         }
@@ -554,7 +566,8 @@ async function main() {
           if (!authLimit(ip)) return json(res, 429, { error: "too many attempts" });
           try {
             const b = JSON.parse(await readBody(req, CFG.maxBodyBytes));
-            const username = String(b.username || "").toLowerCase();
+            const username = asHandle(b.username);
+            if (!username) return json(res, 401, { error: "wrong handle or password" });
             if (lockedOut(res, username)) return;
             const acc = await store.getAccount(username);
             if (!acc || !(await verifyAuth(acc, b))) {
@@ -608,7 +621,7 @@ async function main() {
         }
         if (req.method === "POST") {
           const body = JSON.parse((await readBody(req, CFG.maxBodyBytes)) || "{}");
-          const handle = String(body.handle || body.username || "").toLowerCase();
+          const handle = asHandle(body.handle) || asHandle(body.username) || "";
           if (url.pathname === "/api/admin/announce") { live.announcement = String(body.text || "").slice(0, 500); await store.setSetting("announcement", live.announcement); elog.add("info", live.announcement ? "announcement published" : "announcement cleared"); broadcastStatus(); return json(res, 200, { ok: true }); }
           if (url.pathname === "/api/admin/maintenance") { live.maintenance = !!body.on; live.maintenanceMsg = String(body.message || "").slice(0, 500); await store.setSetting("maintenance", live.maintenance ? "on" : "off"); await store.setSetting("maintenance_msg", live.maintenanceMsg); elog.add("warn", "maintenance " + (live.maintenance ? "enabled" : "disabled")); broadcastStatus(); return json(res, 200, { ok: true, maintenance: live.maintenance }); }
           if (url.pathname === "/api/admin/transport") {
@@ -675,7 +688,7 @@ async function main() {
         // absorb every future delivery. You may only listen on a mailbox that
         // belongs to one of your own account's devices.
         (async () => {
-          const username = await sessionUser(m.token);
+          const username = await sessionUser(asToken(m.token));
           if (!username) { try { ws.close(4001, "unauthorized"); } catch { /* */ } return; }
           const owned = await store.deviceMbkeys(username);
           if (!owned.includes(mbkey)) { try { ws.close(4001, "forbidden mailbox"); } catch { /* */ } return; }

@@ -1,0 +1,9 @@
+# NobleChat security contact (RFC 9116)
+# Found something? Please tell us first. We would much rather hear it from you.
+# The full policy, including what is in and out of scope, is in SECURITY.md.
+
+Contact: https://github.com/OneNobleSoul/noblechat/security/advisories/new
+Expires: 2027-08-12T00:00:00.000Z
+Preferred-Languages: en, de
+Canonical: https://chat.noblesoul.tech/.well-known/security.txt
+Policy: https://github.com/OneNobleSoul/noblechat/blob/main/SECURITY.md

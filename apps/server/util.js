@@ -17,6 +17,28 @@ export const AUTH_SECRET_RE = /^[a-f0-9]{64}$/;
 
 export const isB64 = (s) => typeof s === "string" && B64_RE.test(s);
 
+// Request fields are type-checked rather than coerced.
+//
+// String(x) turns ["kirito"] into "kirito" and [["kirito"]] into "kirito" too,
+// so a JSON array walked straight through the handle check. It was not an auth
+// bypass - the password was still verified - but coercion is the kind of
+// looseness that turns into one after an innocent-looking refactor, and it
+// hands anything downstream a value of a shape it never expected.
+//
+// Returns the normalised handle, or null when the field is not a plain string
+// of the right shape. Callers treat null as "reject".
+export function asHandle(v) {
+  if (typeof v !== "string") return null;
+  const h = v.toLowerCase();
+  return HANDLE_RE.test(h) ? h : null;
+}
+
+// A token/id field: must be a string, and bounded so an oversized value never
+// reaches the database layer.
+export function asToken(v, maxLen = 256) {
+  return typeof v === "string" && v.length > 0 && v.length <= maxLen ? v : null;
+}
+
 export function validCard(c) {
   return c && typeof c === "object" && typeof c.handle === "string" && HANDLE_RE.test(c.handle.toLowerCase()) &&
     isB64(c.providerId) && isB64(c.mailbox) && c.kem && isB64(c.kem.x) && isB64(c.kem.kem) &&

@@ -6,8 +6,32 @@ import {
   readBody, readBodyBuffer, timingEqual, originAllowed,
   hashPassword, verifyPassword, clampExpireSec,
   tryAcquireConn, releaseConn, staticRelPath,
-  clientIp, makeLockout,
+  clientIp, makeLockout, asHandle, asToken,
 } from "../apps/server/util.js";
+
+test("handle fields are type-checked, not coerced", () => {
+  assert.equal(asHandle("Kirito"), "kirito");
+  // String(["kirito"]) is "kirito", so an array used to walk straight through
+  // the handle check. Every non-string shape is rejected outright now.
+  assert.equal(asHandle(["kirito"]), null);
+  assert.equal(asHandle([["kirito"]]), null);
+  assert.equal(asHandle(["kirito", "extra"]), null);
+  assert.equal(asHandle(123), null);
+  assert.equal(asHandle({ $ne: null }), null);
+  assert.equal(asHandle(null), null);
+  assert.equal(asHandle(undefined), null);
+  assert.equal(asHandle("ab"), null, "still has to satisfy the handle format");
+  assert.equal(asHandle("has-dash"), null);
+});
+
+test("token fields must be plain bounded strings", () => {
+  assert.equal(asToken("abc123"), "abc123");
+  assert.equal(asToken(["abc123"]), null);
+  assert.equal(asToken(""), null);
+  assert.equal(asToken({}), null);
+  assert.equal(asToken("x".repeat(257)), null);
+  assert.equal(asToken("x".repeat(256)), "x".repeat(256));
+});
 
 const reqWith = (xff, remote = "10.0.0.1") => ({
   headers: xff === null ? {} : { "x-forwarded-for": xff },
