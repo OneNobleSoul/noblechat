@@ -12,6 +12,7 @@ import { toB64, fromB64, poissonDelay, keysFingerprint } from "../../../packages
 import { deriveAuthSecret } from "../../../packages/crypto/src/authsecret.js";
 import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining, normalizeFile } from "./text-utils.js";
 import { parsePinsJson, pinsToObject, mergeSyncedPin } from "./pin-utils.js";
+import { ownDevicesOnly } from "./card-utils.js";
 import { reactionsAfterToggle, canUnsend, trimHistory, shouldStickToBottom } from "./message-utils.js";
 import { unlocks, isUnlocked, markUnlocked } from "./gate.js";
 import { putKey, getKey, clearKeys } from "./keystore.js";
@@ -369,10 +370,8 @@ async function fetchBundleFor(handle) {
 // word for whose keys these are. Pinning only catches this on a second look;
 // a first contact would have been compromised silently.
 function cardsForHandle(json, handle) {
-  const want = String(handle).toLowerCase();
-  const all = (json && json.devices) || [];
-  const mine = all.filter((c) => c && String(c.handle || "").toLowerCase() === want);
-  if (mine.length !== all.length) toast(`ignored a key card that wasn't ${want}'s`);
+  const { mine, droppedCount } = ownDevicesOnly((json && json.devices) || [], handle);
+  if (droppedCount > 0) toast(`ignored a key card that wasn't ${String(handle).toLowerCase()}'s`);
   return mine.map(deserializeCard);
 }
 async function loadMyBundle() {
