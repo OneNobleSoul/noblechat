@@ -364,3 +364,15 @@ body.lb-open{overflow:hidden}
 .fd-5 { animation-delay: 3.2s; top: 18px; }
 .fd-6 { animation-delay: 4s;   top: 17px; }
 .net-note.pad { padding: 12px; }
+
+/* The network panel keeps a decorative cover-traffic dot moving across the
+   layers forever, and a wrong-password shake jerks the whole login card
+   sideways - both purely decorative motion with a functional equivalent
+   already on screen (the panel labels, the inline error text), unlike the
+   keygen spinner which is the only feedback that keygen is still running.
+   index.css/info.css already opt these kinds of effects out for
+   prefers-reduced-motion; this app shell never got the same treatment. */
+@media (prefers-reduced-motion:reduce){
+  .net-flow .fd{animation:none}
+  .gate.shake .gate-card{animation:none}
+}
