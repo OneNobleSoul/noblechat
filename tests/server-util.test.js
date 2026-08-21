@@ -5,7 +5,7 @@ import {
   HANDLE_RE, DEVICE_ID_RE, isB64, validCard,
   readBody, timingEqual, originAllowed,
   hashPassword, verifyPassword, clampExpireSec,
-  tryAcquireConn, releaseConn, staticRelPath,
+  tryAcquireConn, releaseConn, staticRelPath, staticCacheControl,
   clientIp, makeLockout, asHandle, asToken,
 } from "../apps/server/util.js";
 
@@ -363,6 +363,30 @@ test("static routing: traversal attempts are passed through for the caller to re
   assert.equal(staticRelPath("/../../etc/passwd"), "/../../etc/passwd");
   assert.equal(staticRelPath(""), "/index.html");
   assert.equal(staticRelPath(undefined), "/index.html");
+});
+
+test("static cache-control: noCache always wins, regardless of extension", () => {
+  assert.equal(staticCacheControl("/pub/app.html", "/app", true), "no-cache");
+  assert.equal(staticCacheControl("/pub/sw.js", "/sw.js", true), "no-cache");
+  assert.equal(staticCacheControl("/pub/style.css", "/style.css?v=abc123", true), "no-cache");
+});
+
+test("static cache-control: fonts are always cached hard, no query needed", () => {
+  assert.equal(staticCacheControl("/pub/fonts/inter-400.woff2", "/fonts/inter-400.woff2", false), "public, max-age=31536000, immutable");
+});
+
+test("static cache-control: css/js only get the long cache once the URL carries the content-hash query", () => {
+  assert.equal(staticCacheControl("/pub/app.bundle.js", "/app.bundle.js?v=abc123", false), "public, max-age=31536000, immutable");
+  assert.equal(staticCacheControl("/pub/style.css", "/style.css?v=abc123", false), "public, max-age=31536000, immutable");
+  // fonts.css intentionally ships without ?v= (see app.html) and must not be
+  // cached as if its URL changed whenever the content does - it never does.
+  assert.equal(staticCacheControl("/pub/fonts.css", "/fonts.css", false), null);
+  assert.equal(staticCacheControl("/pub/app.bundle.js", "/app.bundle.js", false), null);
+});
+
+test("static cache-control: everything else falls back to the browser default", () => {
+  assert.equal(staticCacheControl("/pub/icons/icon.svg", "/icons/icon.svg", false), null);
+  assert.equal(staticCacheControl("/pub/manifest.webmanifest", "/manifest.webmanifest", false), null);
 });
 
 test("an oversized body is refused as such, not by dropping the connection", async () => {
