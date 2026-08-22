@@ -4,6 +4,7 @@
 // awkward to pull individual pieces into a test file.
 import crypto from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
@@ -269,6 +270,24 @@ export function staticRelPath(url) {
   if (p === "/") return "/index.html";
   if (p === "/app" || p === "/app/") return "/app.html";
   return p;
+}
+
+// Cache-Control for a static file. HTML (and the service-worker scripts,
+// which the caller flags through noCache the same way) must always
+// revalidate so a deploy actually reaches clients. woff2 fonts carry their
+// weight/subset in the filename, so a changed font is a changed URL. CSS/JS
+// get the same treatment, but only once the request URL is actually stamped
+// with the content-hash ?v= query that server.js's computeVersion() adds -
+// that is what makes the URL change whenever the file does. fonts.css is the
+// one stylesheet that ships without that query (see app.html), so it falls
+// through to the browser's normal heuristic caching like any other asset.
+export function staticCacheControl(file, url, noCache) {
+  if (noCache) return "no-cache";
+  const ext = path.extname(file);
+  if (ext === ".woff2") return "public, max-age=31536000, immutable";
+  if ((ext === ".css" || ext === ".js") && String(url || "").includes("?v="))
+    return "public, max-age=31536000, immutable";
+  return null;
 }
 
 // How long an uploaded attachment's ciphertext should live, in seconds. The

@@ -21,7 +21,7 @@ import { createLog } from "./log.js";
 import { isTransport } from "./transport.js";
 import { connectNym } from "./nym.js";
 import { turnIceServers } from "./turn.js";
-import { HANDLE_RE, DEVICE_ID_RE, AUTH_SECRET_RE, asHandle, asToken, isB64, validCard, readBody, streamToFile, json, timingEqual, originAllowed, hashPassword, verifyPassword, clampExpireSec, tryAcquireConn, releaseConn, staticRelPath, clientIp, makeLockout } from "./util.js";
+import { HANDLE_RE, DEVICE_ID_RE, AUTH_SECRET_RE, asHandle, asToken, isB64, validCard, readBody, streamToFile, json, timingEqual, originAllowed, hashPassword, verifyPassword, clampExpireSec, tryAcquireConn, releaseConn, staticRelPath, staticCacheControl, clientIp, makeLockout } from "./util.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.resolve(__dirname, "../web/public");
@@ -360,10 +360,11 @@ async function main() {
         // always loads fresh CSS/JS.
         data = Buffer.from(data.toString("utf8").replace(/__V__/g, APP_VERSION));
       }
-      if (noCache) headers["Cache-Control"] = "no-cache";
-      // Font files carry their weight and subset in the filename, so a changed
-      // font is a changed URL and these can be cached hard.
-      else if (path.extname(file) === ".woff2") headers["Cache-Control"] = "public, max-age=31536000, immutable";
+      // See staticCacheControl() in util.js for which files get long-term
+      // immutable caching (fonts, and the ?v=-stamped CSS/JS bundles) versus
+      // the ones that always have to revalidate.
+      const cacheControl = staticCacheControl(file, req.url, noCache);
+      if (cacheControl) headers["Cache-Control"] = cacheControl;
       res.writeHead(200, headers);
       res.end(data);
     });
