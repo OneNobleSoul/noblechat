@@ -574,6 +574,7 @@ function connectWS() {
     if (m.t === "deliver") onDeliver(fromB64(m.envelope));
     else if (m.t === "hop") pulseHop(m.label);
     else if (m.t === "status") applyStatus(m);
+    else if (m.t === "device_added") { loadMyBundle().then(renderDevicesBtn); toast("a new device signed in to your account - use the 📱 icon above to sign it out if that wasn't you"); }
   });
   ws.addEventListener("close", (ev) => {
     if (ev.code === 4003) { toast("this account has been suspended"); clearSession(); location.reload(); return; }
