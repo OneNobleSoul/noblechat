@@ -446,7 +446,19 @@ async function main() {
           if (await store.isBanned(username)) return json(res, 403, { error: "account suspended" });
           if (typeof b.deviceId !== "string" || !DEVICE_ID_RE.test(b.deviceId)) return json(res, 400, { error: "bad device id" });
           if (!validCard(b.card) || b.card.handle.toLowerCase() !== username) return json(res, 400, { error: "card must match your handle" });
-          await store.addDevice(b.deviceId, username, b.card, `${b.card.providerId}:${b.card.mailbox}`, CFG.maxDevicesPerAccount);
+          const mbkey = `${b.card.providerId}:${b.card.mailbox}`;
+          const isNew = await store.addDevice(b.deviceId, username, b.card, mbkey, CFG.maxDevicesPerAccount);
+          // A genuinely new device joined the account: nudge the other
+          // already-connected devices so a user notices a device they didn't
+          // add. No identifying detail in the payload, just a signal.
+          if (isNew) {
+            const mbks = await store.deviceMbkeys(username);
+            for (const k of mbks) {
+              if (k === mbkey) continue;
+              const set = mbkeySockets.get(k);
+              if (set) for (const ws of set) { try { ws.send(JSON.stringify({ t: "device_added", at: Date.now() })); } catch { /* */ } }
+            }
+          }
           return json(res, 200, { ok: true });
         } catch (e) {
           if (e && e.code === "E_DEVICE_LIMIT") return json(res, 409, { error: `device limit reached (max ${CFG.maxDevicesPerAccount})` });
