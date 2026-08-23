@@ -155,6 +155,9 @@ export async function openStore(databaseUrl, { mailboxTtlMs = 7 * 24 * 3600 * 10
     },
 
     // ---- devices ----
+    // Returns whether deviceId was a genuinely new row for this account (as
+    // opposed to a re-registration of a device that was already there), so
+    // callers can decide whether to nudge the account's other devices.
     async addDevice(deviceId, username, card, mbkey, maxDevices = 0) {
       // The count and the insert run in one transaction, taking a row lock on
       // the account first. Previously they were two statements with an await
@@ -174,6 +177,11 @@ export async function openStore(databaseUrl, { mailboxTtlMs = 7 * 24 * 3600 * 10
           const c = await client.query("SELECT COUNT(*)::int AS n FROM devices WHERE username=$1 AND device_id<>$2", [username, deviceId]);
           if (c.rows[0].n >= maxDevices) throw Object.assign(new Error("device limit reached"), { code: "E_DEVICE_LIMIT" });
         }
+        // Same lock covers this check, so it can't race with the insert below:
+        // nobody else can add or remove this exact (username, device_id) row
+        // between here and the commit.
+        const existing = await client.query("SELECT 1 FROM devices WHERE username=$1 AND device_id=$2", [username, deviceId]);
+        const isNew = existing.rowCount === 0;
         // Conflict target is (username, device_id): an upsert can only ever
         // touch a row this account already owns. It used to be device_id
         // alone, which let a caller overwrite another account's device.
@@ -182,6 +190,7 @@ export async function openStore(databaseUrl, { mailboxTtlMs = 7 * 24 * 3600 * 10
            ON CONFLICT(username,device_id) DO UPDATE SET card=EXCLUDED.card, mbkey=EXCLUDED.mbkey`,
           [deviceId, username, JSON.stringify(card), mbkey, now()]);
         await client.query("COMMIT");
+        return isNew;
       } catch (e) {
         await client.query("ROLLBACK").catch(() => {});
         // The unique index on mbkey rejects a card that claims a mailbox
