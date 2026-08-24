@@ -1078,7 +1078,7 @@ async function createGroup(name, members) {
 }
 
 // ---------- small popup menu ----------
-function closeMenus() { document.querySelectorAll(".menu-pop.open").forEach((m) => { m.classList.remove("open"); m.hidden = true; }); }
+function closeMenus() { document.querySelectorAll(".menu-pop.open").forEach((m) => { m.classList.remove("open"); m.hidden = true; }); $("#chat-menu")?.setAttribute("aria-expanded", "false"); }
 function buildMenu(pop, handle, { includeClear = false } = {}) {
   const muted = state.muted.has(handle);
   const items = [
@@ -1114,7 +1114,7 @@ function openChatMenu() {
   const pop = $("#chat-menu-pop"); if (!state.active) return;
   buildMenu(pop, state.active, { includeClear: true });
   const wasOpen = pop.classList.contains("open"); closeMenus();
-  if (!wasOpen) { pop.hidden = false; pop.classList.add("open"); }
+  if (!wasOpen) { pop.hidden = false; pop.classList.add("open"); $("#chat-menu")?.setAttribute("aria-expanded", "true"); }
 }
 function reactionsHtml(m) {
   if (!m.reactions) return "";
@@ -1563,7 +1563,7 @@ const EMOJI_CATS = [
   ["Objects", "⌚ 📱 💻 ⌨️ 🖥️ 🖨️ 🖱️ 💽 💾 💿 📀 📷 📸 📹 🎥 📽️ 🎞️ 📞 ☎️ 📟 📠 📺 📻 🧭 ⏱️ ⏲️ ⏰ 🕰️ ⌛ ⏳ 📡 🔋 🔌 💡 🔦 🕯️ 🧯 🛢️ 💸 💵 💴 💶 💷 🪙 💰 💳 💎 ⚖️ 🪜 🧰 🔧 🔨 ⚒️ 🛠️ ⛏️ 🔩 ⚙️ 🧲 🔫 💣 🧨 🔪 🗡️ ⚔️ 🛡️ 🚬 ⚰️ 🪦 🏺 🔮 📿 🧿 💈 ⚗️ 🔭 🔬 🕳️ 🩹 🩺 💊 💉 🩸 🧬 🦠 🧫 🧪 🌡️ 🧹 🧺 🧻 🚽 🚰 🚿 🛁 🛀 🧼 🪥 🪒 🧽 🪣 🔑 🗝️ 🚪 🪑 🛋️ 🛏️ 🖼️ 🛍️ 🛒 🎁 🎈 🎏 🎀 🎊 🎉 🧧 ✉️ 📩 📨 📧 📮 📪 📫 📬 📭 📦 🏷️ 📇 📈 📉 📊 📋 📌 📍 📎 🖇️ 📏 📐 ✂️ 🖊️ 🖋️ ✒️ 🖌️ 🖍️ 📝 ✏️ 🔍 🔎 🔏 🔐 🔒 🔓 📔 📕 📖 📗 📘 📙 📚 📓 📒 📃 📜 📄 📰 📑 🔖"],
   ["Symbols", "❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎 💔 ❣️ 💕 💞 💓 💗 💖 💘 💝 💟 ☮️ ✝️ ☪️ 🕉️ ☸️ ✡️ 🔯 🕎 ☯️ ☦️ 🛐 ⛎ ♈ ♉ ♊ ♋ ♌ ♍ ♎ ♏ ♐ ♑ ♒ ♓ 🆔 ⚛️ 🉑 ☢️ ☣️ 📴 📳 🈶 🈚 🈸 🈺 🈷️ ✴️ 🆚 💮 🉐 ㊙️ ㊗️ 🈴 🈵 🈹 🈲 🅰️ 🅱️ 🆎 🆑 🅾️ 🆘 ❌ ⭕ 🛑 ⛔ 📛 🚫 💯 💢 ♨️ 🚷 🚯 🚳 🚱 🔞 📵 🚭 ❗ ❕ ❓ ❔ ‼️ ⁉️ 🔅 🔆 〽️ ⚠️ 🚸 🔱 ⚜️ 🔰 ♻️ ✅ 🈯 💹 ❇️ ✳️ ❎ 🌐 💠 Ⓜ️ 🌀 💤 🏧 🚾 ♿ 🅿️ 🈳 🈂️ 🛂 🛃 🛄 🛅 🚹 🚺 🚼 ⚧️ 🚻 🚮 🎦 📶 🈁 🔣 ℹ️ 🔤 🔡 🔠 🆖 🆗 🆙 🆒 🆕 🆓 0️⃣ 1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ 6️⃣ 7️⃣ 8️⃣ 9️⃣ 🔟 ▶️ ⏸️ ⏯️ ⏹️ ⏺️ ⏭️ ⏮️ ⏩ ⏪ 🔀 🔁 🔂 ◀️ 🔼 🔽 ⏫ ⏬ ➡️ ⬅️ ⬆️ ⬇️ ↗️ ↘️ ↙️ ↖️ ↕️ ↔️ ↩️ ↪️ ⤴️ ⤵️ 🔃 🔄 🔙 🔚 🔛 🔜 🔝 ➕ ➖ ➗ ✖️ 🟰 ♾️ 💲 💱 ™️ ©️ ®️ 〰️ ➰ ➿ 🔚 ✔️ ☑️ 🔘 🔴 🟠 🟡 🟢 🔵 🟣 🟤 ⚫ ⚪ 🟥 🟧 🟨 🟩 🟦 🟪 🟫 ⬛ ⬜ ◼️ ◻️ ◾ ◽ ▪️ ▫️ 🔶 🔷 🔸 🔹 🔺 🔻 💠 🔳 🔲 🏁 🚩 🎌 🏴 🏳️ 🏳️‍🌈 🏳️‍⚧️ 🏴‍☠️"],
 ];
-function closeEmoji() { const p = $("#emoji-pop"); if (p) { p.hidden = true; p.classList.remove("open"); } }
+function closeEmoji() { const p = $("#emoji-pop"); if (p) { p.hidden = true; p.classList.remove("open"); } $("#emoji-btn")?.setAttribute("aria-expanded", "false"); }
 function wireEmoji() {
   const btn = $("#emoji-btn"), pop = $("#emoji-pop"); if (!btn || !pop) return;
   if (!pop.dataset.built) {
@@ -1571,7 +1571,7 @@ function wireEmoji() {
     pop.dataset.built = "1";
   }
   pop.querySelectorAll(".emoji").forEach((b) => b.addEventListener("click", () => insertAtCursor($("#msg-input"), b.textContent)));
-  btn.addEventListener("click", (e) => { e.stopPropagation(); const open = pop.classList.contains("open"); closeEmoji(); if (!open) { pop.hidden = false; pop.classList.add("open"); } });
+  btn.addEventListener("click", (e) => { e.stopPropagation(); const open = pop.classList.contains("open"); closeEmoji(); if (!open) { pop.hidden = false; pop.classList.add("open"); btn.setAttribute("aria-expanded", "true"); } });
 }
 function insertAtCursor(input, text) {
   if (!input) return;
