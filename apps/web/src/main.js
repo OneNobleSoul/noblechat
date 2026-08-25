@@ -16,6 +16,7 @@ import { ownDevicesOnly } from "./card-utils.js";
 import { reactionsAfterToggle, canUnsend, trimHistory, shouldStickToBottom } from "./message-utils.js";
 import { unlocks, isUnlocked, markUnlocked } from "./gate.js";
 import { putKey, getKey, clearKeys } from "./keystore.js";
+import { isTurnServer } from "./ice-utils.js";
 
 // Name the blob key is filed under in IndexedDB.
 const BLOB_KEY_NAME = "blob";
@@ -1309,10 +1310,6 @@ const STUN_SERVERS = [
 // relay is available we do NOT leak silently - the caller/callee must first
 // consent to exposing their IP (see confirmCallIpExposure). Public STUN is
 // kept only for that consented direct-connection fallback.
-const isTurnServer = (s) => {
-  const arr = Array.isArray(s && s.urls) ? s.urls : [s && s.urls];
-  return arr.some((x) => typeof x === "string" && x.toLowerCase().startsWith("turn:"));
-};
 let iceServersCache = null;
 async function fetchIceServers() {
   const now = Date.now();
