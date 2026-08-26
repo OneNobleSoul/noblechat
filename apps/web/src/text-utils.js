@@ -40,8 +40,14 @@ export function fmtSize(n) {
 export function fmtRemaining(ms) {
   const s = Math.max(0, Math.round(ms / 1000));
   if (s < 60) return s + "s";
-  if (s < 3600) return Math.round(s / 60) + "m";
-  if (s < 86400) return Math.round(s / 3600) + "h";
+  // Round into each unit and only keep it if it still belongs there. Rounding
+  // the raw second count straight into a fixed threshold overflows near every
+  // boundary (3599s used to print "60m" instead of "1h", 86399s "24h" instead
+  // of "1d") because the rounded value can tip past the next unit up.
+  const m = Math.round(s / 60);
+  if (m < 60) return m + "m";
+  const h = Math.round(s / 3600);
+  if (h < 24) return h + "h";
   return Math.round(s / 86400) + "d";
 }
 
