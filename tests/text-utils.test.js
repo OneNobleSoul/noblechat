@@ -70,6 +70,11 @@ test("fmtRemaining clamps a past deadline to 0 instead of a negative number", ()
   assert.equal(fmtRemaining(-5000), "0s");
 });
 
+test("fmtRemaining does not overflow into the next unit right at a boundary", () => {
+  assert.equal(fmtRemaining(3599000), "1h");
+  assert.equal(fmtRemaining(86399000), "1d");
+});
+
 test("normalizeFile rejects missing or non-object attachments", () => {
   assert.equal(normalizeFile(undefined), undefined);
   assert.equal(normalizeFile(null), undefined);
