@@ -28,7 +28,7 @@
     <label for="gate-input">Access password</label>
     <input id="gate-input" type="password" placeholder="enter test password" autocomplete="off" spellcheck="false">
     <button id="gate-go" class="btn">Unlock</button>
-    <p id="gate-err" class="err" hidden>Wrong password - try again.</p>
+    <p id="gate-err" class="err" role="alert" hidden>Wrong password - try again.</p>
     <p class="fine">Temporary gate while we test. It only limits who can open the page.</p>
   </div>
 </div>
@@ -49,7 +49,7 @@
       <label for="auth-pass">Password</label>
       <input id="auth-pass" type="password" placeholder="your password" autocomplete="current-password">
       <button id="auth-go" class="btn">Sign in</button>
-      <p id="setup-err" class="err" hidden></p>
+      <p id="setup-err" class="err" role="alert" hidden></p>
       <p class="fine">Your message keys are generated on this device and never leave it. Your password never leaves it either: it stays here, and the server only ever receives a value derived from it that it can check but not reverse. Your contact list is encrypted under a separate key derived from the same password, which the server never sees in any form.</p>
     </div>
 
@@ -155,7 +155,7 @@
     <input id="group-name" placeholder="e.g. friends" maxlength="60" autocomplete="off">
     <label>Members</label>
     <div id="group-members" class="group-members"></div>
-    <p id="group-err" class="err" hidden></p>
+    <p id="group-err" class="err" role="alert" hidden></p>
     <div class="modal-actions">
       <button id="group-cancel" class="btn ghost">Cancel</button>
       <button id="group-create" class="btn">Create</button>
