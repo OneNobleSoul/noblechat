@@ -21,7 +21,7 @@
     <label for="token">Admin token</label>
     <input id="token" type="password" placeholder="admin token" autocomplete="off">
     <button id="login-go" class="btn ghost">Sign in with token</button>
-    <p id="login-err" class="err hidden">Invalid credentials.</p>
+    <p id="login-err" class="err hidden" role="alert">Invalid credentials.</p>
   </div>
 
   <div id="dash" class="hidden">
@@ -55,7 +55,7 @@
         <button id="tr-nym" class="btn ghost">Nym mixnet</button>
       </div>
       <p class="muted mb-0">Internal runs our own node fleet. Nym routes through the public Nym network and needs the nym-client sidecar up before it can be enabled.</p>
-      <p id="tr-err" class="err hidden"></p>
+      <p id="tr-err" class="err hidden" role="alert"></p>
     </div>
 
     <div class="card">
