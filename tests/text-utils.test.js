@@ -58,6 +58,11 @@ test("fmtSize treats missing or bogus input as 0 bytes instead of NaN", () => {
   assert.equal(fmtSize("not a number"), "0 B");
 });
 
+test("fmtSize does not overflow into 1024 KB right below the MB boundary", () => {
+  assert.equal(fmtSize(1048575), "1.0 MB");
+  assert.equal(fmtSize(1047552), "1023 KB");
+});
+
 test("fmtRemaining picks the coarsest unit that still fits: s, m, h, d", () => {
   assert.equal(fmtRemaining(5000), "5s");
   assert.equal(fmtRemaining(59000), "59s");
