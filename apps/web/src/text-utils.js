@@ -27,11 +27,16 @@ export function mimeKind(mime) {
   return m.startsWith("image/") ? "image" : m.startsWith("video/") ? "video" : m.startsWith("audio/") ? "audio" : "";
 }
 
-// human-readable file size for attachment rows (B/KB/MB, no fractional bytes)
+// human-readable file size for attachment rows (B/KB/MB, no fractional bytes).
+// Round into the KB bucket first and check it still fits there before
+// printing it, same fix as fmtRemaining below: a file just under 1 MB (e.g.
+// 1048575 bytes) rounds to 1024 KB, which reads like a stuck counter instead
+// of just showing "1.0 MB".
 export function fmtSize(n) {
   n = Number(n) || 0;
   if (n < 1024) return n + " B";
-  if (n < 1048576) return (n / 1024).toFixed(0) + " KB";
+  const kb = Math.round(n / 1024);
+  if (kb < 1024) return kb + " KB";
   return (n / 1048576).toFixed(1) + " MB";
 }
 
