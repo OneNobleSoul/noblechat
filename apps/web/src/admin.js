@@ -5,6 +5,7 @@
 // public/) so it can share the auth secret derivation with the chat client
 // instead of carrying its own copy of the KDF.
 import { deriveAuthSecret } from "../../../packages/crypto/src/authsecret.js";
+import { esc, fmtTime, fmtUptime } from "./admin-utils.js";
 
 const $ = (s) => document.querySelector(s);
 const TOKEN_KEY = "nc-admin-token";
@@ -15,8 +16,6 @@ async function api(path, method = "GET", body) {
   if (res.status === 401) { signOut(); throw new Error("unauthorized"); }
   return res.json().catch(() => ({}));
 }
-function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
-function fmtTime(ms) { try { return new Date(Number(ms)).toLocaleString(); } catch { return "-"; } }
 function showDash(on) { $("#login").classList.toggle("hidden", on); $("#dash").classList.toggle("hidden", !on); }
 
 async function signIn(t) {
@@ -48,12 +47,6 @@ async function signInAccount(username, password) {
 }
 function signOut() { sessionStorage.removeItem(TOKEN_KEY); token = ""; showDash(false); }
 
-function fmtUptime(sec) {
-  sec = Number(sec) || 0;
-  if (sec < 3600) return Math.floor(sec / 60) + "m";
-  if (sec < 86400) return Math.floor(sec / 3600) + "h " + Math.floor((sec % 3600) / 60) + "m";
-  return Math.floor(sec / 86400) + "d " + Math.floor((sec % 86400) / 3600) + "h";
-}
 function renderStatus(s) {
   $("#ver").textContent = "version " + (s.version || "-");
   $("#s-users").textContent = s.users ?? 0;
