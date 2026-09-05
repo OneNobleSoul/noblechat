@@ -15,6 +15,26 @@ export function simpleHash(s) {
 // map extensions to a mime when the browser gives us none (common for .mov)
 export const MEDIA_EXT = { mov: "video/quicktime", mp4: "video/mp4", m4v: "video/mp4", webm: "video/webm", ogv: "video/ogg", mkv: "video/x-matroska", mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav", ogg: "audio/ogg", oga: "audio/ogg", aac: "audio/aac", flac: "audio/flac", opus: "audio/ogg" };
 
+// Cut a filename down to maxLen characters without chopping the extension
+// off. A plain slice() cuts wherever it lands, so a long name like
+// "quarterly-report-final-with-all-the-numbers-included.pdf" can lose its
+// ".pdf" and turn into a file the OS/gallery app can no longer recognize
+// once downloaded, even though NobleChat itself still knows the real mime
+// from the separate mime field. Keep the extension when it is short enough
+// to leave room for at least one character of the base name.
+export function truncateFilename(name, maxLen = 120) {
+  const s = String(name || "file");
+  if (s.length <= maxLen) return s;
+  const dot = s.lastIndexOf(".");
+  if (dot > 0) {
+    const ext = s.slice(dot);
+    // a real extension is short; anything longer is more likely a stray dot
+    // inside a long name with no actual suffix worth preserving
+    if (ext.length > 1 && ext.length <= 20 && ext.length < maxLen) return s.slice(0, dot).slice(0, maxLen - ext.length) + ext;
+  }
+  return s.slice(0, maxLen);
+}
+
 export function fileMime(file) {
   if (file.type) return file.type;
   const ext = (file.name.split(".").pop() || "").toLowerCase();
@@ -64,7 +84,7 @@ export function fmtRemaining(ms) {
 export function normalizeFile(f) {
   if (!f || typeof f !== "object") return undefined;
   const out = {
-    name: String(f.name || "file").slice(0, 120),
+    name: truncateFilename(f.name, 120),
     mime: String(f.mime || "application/octet-stream").slice(0, 100),
     size: Number(f.size) || 0,
     id: String(f.id || ""),
