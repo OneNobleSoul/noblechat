@@ -15,7 +15,7 @@
     "@capacitor/ios": "^6.1.2"
   },
   "devDependencies": {
-    "@capacitor/cli": "^8.5.0"
+    "@capacitor/cli": "^8.5.1"
   },
   "overrides": {
     "xcode": {
