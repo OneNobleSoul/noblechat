@@ -10,7 +10,7 @@ import {
 } from "../../../packages/net/src/serialize.js";
 import { toB64, fromB64, poissonDelay, keysFingerprint } from "../../../packages/crypto/src/util.js";
 import { deriveAuthSecret } from "../../../packages/crypto/src/authsecret.js";
-import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining, normalizeFile } from "./text-utils.js";
+import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining, normalizeFile, truncateFilename } from "./text-utils.js";
 import { parsePinsJson, pinsToObject, mergeSyncedPin } from "./pin-utils.js";
 import { ownDevicesOnly } from "./card-utils.js";
 import { reactionsAfterToggle, canUnsend, trimHistory, shouldStickToBottom } from "./message-utils.js";
@@ -894,7 +894,7 @@ async function sendFile(file, expireSec = 0) {
     const r = await fetch("/api/upload", { method: "POST", headers, body: enc });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j.id) { toast(j.error || "upload failed"); return; }
-    const fileMeta = { name: file.name.slice(0, 120), mime, size: file.size, id: j.id, key: toB64(keyRaw), enc: "c1" };
+    const fileMeta = { name: truncateFilename(file.name, 120), mime, size: file.size, id: j.id, key: toB64(keyRaw), enc: "c1" };
     if (expireSec > 0) fileMeta.expireAt = Date.now() + expireSec * 1000;
     await deliverContent(target, "", { file: fileMeta });
   } catch { toast("could not send file"); }

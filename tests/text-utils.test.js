@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining, normalizeFile } from "../apps/web/src/text-utils.js";
+import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining, normalizeFile, truncateFilename } from "../apps/web/src/text-utils.js";
 
 test("esc escapes every HTML-significant character used to render messages", () => {
   assert.equal(esc("<script>alert('hi')</script>"), "&lt;script&gt;alert(&#39;hi&#39;)&lt;/script&gt;");
@@ -78,6 +78,32 @@ test("fmtRemaining clamps a past deadline to 0 instead of a negative number", ()
 test("fmtRemaining does not overflow into the next unit right at a boundary", () => {
   assert.equal(fmtRemaining(3599000), "1h");
   assert.equal(fmtRemaining(86399000), "1d");
+});
+
+test("truncateFilename leaves short names untouched", () => {
+  assert.equal(truncateFilename("photo.png", 120), "photo.png");
+  assert.equal(truncateFilename("", 120), "file");
+});
+
+test("truncateFilename keeps the extension when cutting a long name", () => {
+  const long = "a".repeat(200) + ".pdf";
+  const out = truncateFilename(long, 120);
+  assert.equal(out.length, 120);
+  assert.ok(out.endsWith(".pdf"), `expected ${out} to keep .pdf`);
+});
+
+test("truncateFilename falls back to a plain cut when there is no usable extension", () => {
+  assert.equal(truncateFilename("a".repeat(200), 120).length, 120);
+  // a leading dot is a hidden-file marker, not an extension - do not treat it as one
+  const hidden = "." + "b".repeat(200);
+  assert.equal(truncateFilename(hidden, 120), hidden.slice(0, 120));
+});
+
+test("truncateFilename does not use an implausibly long extension", () => {
+  const weird = "a".repeat(200) + "." + "b".repeat(50);
+  const out = truncateFilename(weird, 120);
+  assert.equal(out.length, 120);
+  assert.ok(!out.endsWith("b".repeat(50)));
 });
 
 test("normalizeFile rejects missing or non-object attachments", () => {
