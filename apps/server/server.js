@@ -690,7 +690,9 @@ async function main() {
           return json(res, 200, { nodes: checks });
         }
         if (req.method === "POST") {
-          const body = JSON.parse((await readBody(req, CFG.maxBodyBytes)) || "{}");
+          let body;
+          try { body = JSON.parse((await readBody(req, CFG.maxBodyBytes)) || "{}"); }
+          catch (e) { return badBody(res, e); }
           const handle = asHandle(body.handle) || asHandle(body.username) || "";
           if (url.pathname === "/api/admin/announce") { live.announcement = String(body.text || "").slice(0, 500); await store.setSetting("announcement", live.announcement); elog.add("info", live.announcement ? "announcement published" : "announcement cleared"); broadcastStatus(); return json(res, 200, { ok: true }); }
           if (url.pathname === "/api/admin/maintenance") { live.maintenance = !!body.on; live.maintenanceMsg = String(body.message || "").slice(0, 500); await store.setSetting("maintenance", live.maintenance ? "on" : "off"); await store.setSetting("maintenance_msg", live.maintenanceMsg); elog.add("warn", "maintenance " + (live.maintenance ? "enabled" : "disabled")); broadcastStatus(); return json(res, 200, { ok: true, maintenance: live.maintenance }); }
