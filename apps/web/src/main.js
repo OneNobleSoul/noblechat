@@ -1226,7 +1226,16 @@ function openLightbox(node) {
   lb.hidden = false; document.body.classList.add("lb-open");
 }
 function closeLightbox() { const lb = document.getElementById("lightbox"); if (lb) lb.hidden = true; document.body.classList.remove("lb-open"); }
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeLightbox(); });
+// Escape closes whichever modal-like overlay is currently open, topmost first.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  const lb = document.getElementById("lightbox");
+  if (lb && !lb.hidden) { closeLightbox(); return; }
+  const gm = document.getElementById("group-modal");
+  if (gm && !gm.hidden) { closeGroupModal(); return; }
+  const sm = document.getElementById("safety-modal");
+  if (sm && !sm.hidden) { sm.hidden = true; }
+});
 function updateStats() { $("#stat-sent").textContent = state.stats.sent; $("#stat-cover").textContent = state.stats.cover; $("#stat-recv").textContent = state.stats.recv; }
 
 // ---------- cover traffic ----------
