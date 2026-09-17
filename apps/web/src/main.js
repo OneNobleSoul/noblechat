@@ -14,6 +14,7 @@ import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining, normalizeFi
 import { parsePinsJson, pinsToObject, mergeSyncedPin } from "./pin-utils.js";
 import { ownDevicesOnly } from "./card-utils.js";
 import { reactionsAfterToggle, canUnsend, trimHistory, shouldStickToBottom } from "./message-utils.js";
+import { addedMembers } from "./group-utils.js";
 import { unlocks, isUnlocked, markUnlocked } from "./gate.js";
 import { putKey, getKey, clearKeys } from "./keystore.js";
 import { isTurnServer } from "./ice-utils.js";
@@ -600,6 +601,13 @@ function ensureGroup(g) {
   // meant a full blob upload per received message from every member. Only
   // write when the name or membership actually changed.
   if (cur && cur.name === name && JSON.stringify(cur.members || []) === JSON.stringify(members)) return;
+  // Any member's client can send an updated list and it is adopted here with
+  // no authorisation check, so flag additions the same way a key change is
+  // flagged - otherwise someone could get quietly added to a "private" group.
+  if (cur && cur.members) {
+    const added = addedMembers(cur.members, members);
+    if (added.length) toast(`${added.join(", ")} added to "${name}"`);
+  }
   state.groups.set(g.id, { id: g.id, name, members });
   saveContactsLocal(); uploadContactsBlob();
 }
