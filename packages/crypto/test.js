@@ -5,6 +5,7 @@ import {
   generateKemKeypair, kemPublicBundle, encapsulate, decapsulate,
   generateSignKeypair, signPublicBundle, sign, verify,
   randomUnitFloat, randomIndex, keysFingerprint, poissonDelay,
+  toB64, fromB64, toHex, fromHex, concatBytes,
 } from "./src/index.js";
 
 test("AEAD round-trips and rejects tampering", () => {
@@ -99,4 +100,54 @@ test("keysFingerprint is order-independent and change-sensitive", () => {
   assert.notEqual(keysFingerprint(set1), keysFingerprint(set3));
   assert.match(keysFingerprint(set1), /^[0-9a-f]{64}$/);
   assert.equal(keysFingerprint([]), keysFingerprint([]));
+});
+
+// toB64/fromB64 carry every key, card, and message payload across the wire
+// and into localStorage, yet had no direct test anywhere - a round-trip bug
+// here would silently corrupt everything downstream instead of failing loud.
+test("toB64/fromB64 round-trip arbitrary bytes, including every byte value and empty input", () => {
+  assert.equal(toB64(new Uint8Array(0)), "");
+  assert.deepEqual(fromB64(""), new Uint8Array(0));
+  const full = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) full[i] = i;
+  assert.deepEqual(fromB64(toB64(full)), full);
+  const random = randomBytes(97); // odd length, forces base64 padding
+  assert.deepEqual(fromB64(toB64(random)), random);
+});
+
+// toB64/fromB64 branch on `typeof Buffer` to also work in a browser, where
+// there is no Buffer and only atob/btoa exist. That branch never runs under
+// Node's own test runner otherwise, since Node always has Buffer - hide it
+// the same way tests/keystore.test.js hides indexedDB to reach its fallback.
+test("toB64/fromB64 round-trip the same way without Buffer, as in a real browser", () => {
+  const hadBuffer = "Buffer" in globalThis;
+  const prevBuffer = globalThis.Buffer;
+  delete globalThis.Buffer;
+  try {
+    const random = randomBytes(33);
+    const b64 = toB64(random);
+    assert.equal(typeof b64, "string");
+    assert.deepEqual(fromB64(b64), random);
+  } finally {
+    if (hadBuffer) globalThis.Buffer = prevBuffer;
+  }
+});
+
+test("toHex/fromHex round-trip and toHex matches the well-known lowercase form", () => {
+  const bytes = new Uint8Array([0, 1, 15, 16, 255, 128]);
+  assert.equal(toHex(bytes), "00010f10ff80");
+  assert.deepEqual(fromHex(toHex(bytes)), bytes);
+  assert.deepEqual(fromHex(""), new Uint8Array(0));
+});
+
+test("concatBytes joins arrays in order and leaves the inputs untouched", () => {
+  const a = new Uint8Array([1, 2]);
+  const b = new Uint8Array([]);
+  const c = new Uint8Array([3, 4, 5]);
+  assert.deepEqual(concatBytes(a, b, c), new Uint8Array([1, 2, 3, 4, 5]));
+  assert.deepEqual(concatBytes(), new Uint8Array(0));
+  // inputs are copied, not aliased
+  const out = concatBytes(a, c);
+  out[0] = 99;
+  assert.equal(a[0], 1);
 });
