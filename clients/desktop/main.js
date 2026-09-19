@@ -2,6 +2,7 @@
 // all key generation and encryption still happen in the (Chromium) renderer,
 // exactly like the browser. Point it at another deployment with NOBLECHAT_URL.
 const { app, BrowserWindow, shell } = require("electron");
+const { isHttpUrl, sameOrigin } = require("./url-guards.js");
 
 const APP_URL = process.env.NOBLECHAT_URL || "https://chat.noblesoul.tech/app";
 
@@ -21,10 +22,20 @@ function createWindow() {
     },
   });
 
-  // Open external links in the real browser, never in-app.
+  // Open external links in the real browser, never in-app, and only if
+  // they're actually http(s) (no handing file:/custom schemes to the shell).
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (isHttpUrl(url)) shell.openExternal(url);
     return { action: "deny" };
+  });
+
+  // The window should only ever show our own app. If the page tries to
+  // navigate itself somewhere else (redirect, compromised asset, a rogue
+  // window.location change), block it instead of quietly following along
+  // with full app chrome still showing.
+  const appOrigin = new URL(APP_URL).origin;
+  win.webContents.on("will-navigate", (event, url) => {
+    if (!sameOrigin(url, appOrigin)) event.preventDefault();
   });
 
   win.loadURL(APP_URL);
