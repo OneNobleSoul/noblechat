@@ -113,6 +113,17 @@ input{font-family:var(--sans)}
 .gm-row input{width:auto;margin:0}
 .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
 .btn.ghost{background:var(--panel-2);color:var(--text);border:1px solid var(--line)}
+.btn.danger{background:transparent;color:var(--danger);border:1px solid color-mix(in srgb,var(--danger) 45%,var(--line))}
+.btn.danger:hover{background:color-mix(in srgb,var(--danger) 14%,transparent);box-shadow:none}
+/* settings panel sections */
+.set-sec{padding:14px 0;border-top:1px solid var(--line)}
+.set-sec:first-of-type{border-top:0;padding-top:0}
+.set-label{font-family:var(--mono);font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--dim);margin-bottom:10px}
+.set-label.danger-label{color:var(--danger);opacity:.85}
+.set-row{display:flex;justify-content:space-between;align-items:center;font-size:14px;margin-bottom:12px}
+.set-row b{font-family:var(--mono)}
+.set-btn{width:100%}
+.set-hint{color:var(--dim);font-size:12px;line-height:1.5;margin:10px 0 0}
 
 /* calls */
 #call-voice{margin-left:auto}

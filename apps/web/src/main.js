@@ -1337,6 +1337,8 @@ document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   const lb = document.getElementById("lightbox");
   if (lb && !lb.hidden) { closeLightbox(); return; }
+  const stm = document.getElementById("settings-modal");
+  if (stm && !stm.hidden) { closeSettings(); return; }
   const gm = document.getElementById("group-modal");
   if (gm && !gm.hidden) { closeGroupModal(); return; }
   const sm = document.getElementById("safety-modal");
@@ -1380,6 +1382,39 @@ async function forgetOtherDevices() {
     await loadMyBundle(); renderDevicesBtn();
     toast(`removed ${j.removed} other device${j.removed === 1 ? "" : "s"}`);
   } catch { toast("could not remove devices"); }
+}
+
+// ---------- settings panel ----------
+function openSettings() {
+  const m = $("#settings-modal"); if (!m) return;
+  const h = $("#set-handle"); if (h) h.textContent = state.user || "—";
+  m.hidden = false;
+}
+function closeSettings() { const m = $("#settings-modal"); if (m) m.hidden = true; }
+// Erase every trace of the account from THIS device (session, keys, history and
+// the retained device identity) and return to sign-in. The account and other
+// devices are untouched. Unlike logout, this also drops the device keypair.
+function panicWipe() {
+  if (!confirm("Wipe this device? All local keys, history and the session here are erased. Your account and other devices stay, you'll just need to sign in again on this device.")) return;
+  try { for (const k of Object.values(K)) ls.del(k); } catch { /* */ }
+  clearKeys();
+  location.reload();
+}
+// Permanently delete the whole account (all devices + queued ciphertext), then
+// wipe this device too. Requires typing the handle to confirm.
+async function deleteAccountFlow() {
+  const h = state.user || "";
+  const typed = prompt(`This permanently deletes your account "${h}", all your devices and any messages still queued on the server. It cannot be undone.\n\nType your handle to confirm:`);
+  if (typed == null) return;
+  if (typed.trim().toLowerCase() !== h.toLowerCase()) { toast("handle did not match, nothing deleted"); return; }
+  try {
+    const r = await fetch("/api/account/delete", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: state.token, deviceId: state.deviceId }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { toast(j.error || "could not delete account"); return; }
+    try { for (const k of Object.values(K)) ls.del(k); } catch { /* */ }
+    clearKeys();
+    location.reload();
+  } catch { toast("could not delete account"); }
 }
 
 // ---------- mix viz ----------
@@ -1642,6 +1677,11 @@ function wireUI() {
   const cover = $("#cover-toggle"); cover.addEventListener("click", toggleCover); cover.textContent = "cover: " + (state.coverOn ? "on" : "off"); cover.classList.toggle("on", state.coverOn);
   const lo = $("#logout-btn"); if (lo) lo.addEventListener("click", logout);
   const dvb = $("#devices-btn"); if (dvb) dvb.addEventListener("click", forgetOtherDevices);
+  const setb = $("#settings-btn"); if (setb) setb.addEventListener("click", openSettings);
+  const setc = $("#set-close"); if (setc) setc.addEventListener("click", closeSettings);
+  const setdev = $("#set-devices"); if (setdev) setdev.addEventListener("click", () => { closeSettings(); forgetOtherDevices(); });
+  const setw = $("#set-wipe"); if (setw) setw.addEventListener("click", panicWipe);
+  const setdel = $("#set-delete"); if (setdel) setdel.addEventListener("click", deleteAccountFlow);
   const snd = $("#sound-toggle"); if (snd) snd.addEventListener("click", toggleSound); renderSoundToggle();
   const back = $("#chat-back"); if (back) back.addEventListener("click", () => setMobileView("list"));
   const cmenu = $("#chat-menu"); if (cmenu) cmenu.addEventListener("click", (e) => { e.stopPropagation(); openChatMenu(); });

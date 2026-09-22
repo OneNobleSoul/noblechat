@@ -77,6 +77,7 @@
       <button id="sound-toggle" class="pill" title="Notification sound for new messages" aria-label="Notification sound for new messages">🔔</button>
       <button id="cover-toggle" class="pill" title="Send indistinguishable dummy traffic to hide when you talk">cover: off</button>
       <button id="devices-btn" class="pill" title="Sign out your other devices" aria-label="Sign out your other devices" hidden>📱</button>
+      <button id="settings-btn" class="pill" title="Settings" aria-label="Settings">⚙</button>
       <button id="logout-btn" class="pill" title="Sign out of this device">sign out</button>
     </div>
   </header>
@@ -149,6 +150,30 @@
 </div>
 
 <!-- NEW GROUP dialog -->
+<div id="settings-modal" class="modal" hidden>
+  <div class="modal-card">
+    <div class="modal-title">Settings</div>
+    <div class="set-sec">
+      <div class="set-label">Account</div>
+      <div class="set-row"><span>Signed in as</span><b id="set-handle">—</b></div>
+      <button id="set-devices" class="btn ghost set-btn">Sign out other devices</button>
+    </div>
+    <div class="set-sec">
+      <div class="set-label">This device</div>
+      <button id="set-wipe" class="btn ghost set-btn">Wipe this device</button>
+      <p class="set-hint">Erases this device's local keys, history and session. Your account and other devices are untouched. Use it on a shared or lost device.</p>
+    </div>
+    <div class="set-sec">
+      <div class="set-label danger-label">Danger zone</div>
+      <button id="set-delete" class="btn danger set-btn">Delete my account</button>
+      <p class="set-hint">Permanently removes your account, every device and any ciphertext still queued on the server. This cannot be undone.</p>
+    </div>
+    <div class="modal-actions">
+      <button id="set-close" class="btn ghost">Close</button>
+    </div>
+  </div>
+</div>
+
 <div id="group-modal" class="modal" hidden>
   <div class="modal-card">
     <div class="modal-title">New group</div>
