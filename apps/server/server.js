@@ -170,6 +170,10 @@ function rateLimiter({ capacity, refillPerSec }) {
     if (b.tokens < cost) return false; b.tokens -= cost; return true;
   };
 }
+// Upper bound on a mixnet inner payload accepted for delivery (pentest N-01d).
+// A legitimate sealed envelope is a few KB; this blocks a 256 KB junk injection
+// while staying far above anything real, on the unauthenticated Nym path too.
+const MAX_INNER_BYTES = 64 * 1024;
 async function main() {
   const store = await openStore(CFG.databaseUrl, { mailboxTtlMs: CFG.mailboxTtlMs, maxPerMailbox: CFG.maxPerMailbox, filesDir: CFG.filesDir });
   const mailboxStore = {
@@ -213,7 +217,7 @@ async function main() {
   // path as the internal provider nodes.
   const nym = CFG.nymClientUrl
     ? connectNym(CFG.nymClientUrl, {
-        onPayload: (p, i) => { try { mix._deliver(fromB64(p), fromB64(i)); counters.delivered++; counters.nymReceived++; } catch { /* */ } },
+        onPayload: (p, i) => { try { const inner = fromB64(i); if (inner.length > MAX_INNER_BYTES) return; mix._deliver(fromB64(p), inner); counters.delivered++; counters.nymReceived++; } catch { /* */ } },
         onLog: (lvl, ev, det) => elog.add(lvl, ev, det),
         onConnect: () => {
           if (desiredTransport === "nym" && live.transport !== "nym") {
@@ -392,7 +396,7 @@ async function main() {
       // ---- internal (mix nodes only; gated by a shared secret) ----
       if (url.pathname === "/internal/deliver" && req.method === "POST") {
         if (!internalOk(req)) { res.writeHead(401).end(); return; }
-        try { const b = JSON.parse(await readBody(req, CFG.maxWsMsgBytes)); mix._deliver(fromB64(b.providerId), fromB64(b.payload)); counters.delivered++; } catch { /* */ }
+        try { const b = JSON.parse(await readBody(req, CFG.maxWsMsgBytes)); const payload = fromB64(b.payload); if (payload.length > MAX_INNER_BYTES) return json(res, 413, { error: "too large" }); mix._deliver(fromB64(b.providerId), payload); counters.delivered++; } catch { /* */ }
         res.writeHead(202).end(); return;
       }
       if (url.pathname === "/internal/hop" && req.method === "POST") {
@@ -400,7 +404,7 @@ async function main() {
         try { const b = JSON.parse(await readBody(req, 4096)); if (b.label) broadcast({ t: "hop", label: String(b.label).slice(0, 40) }); } catch { /* */ }
         res.writeHead(202).end(); return;
       }
-      if (url.pathname === "/api/net") { if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" }); return json(res, 200, { view: dir.publicView(), meanDelayMs: CFG.meanDelayMs }); }
+      if (url.pathname === "/api/net" && req.method === "GET") { if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" }); return json(res, 200, { view: dir.publicView(), meanDelayMs: CFG.meanDelayMs }); }
       if (url.pathname === "/api/status" && req.method === "GET") { if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" }); return json(res, 200, statusObj()); }
       // Release notes, authored by admins (see /api/admin/changelog). Public: it
       // is not sensitive, just what changed between builds.
@@ -517,7 +521,7 @@ async function main() {
       // the handle namespace to map the user base, link mailbox ids (which are
       // meant to be unlinkable to an observer) back to handles, and watch a
       // given account's device count change over time.
-      if (url.pathname === "/api/bundle") {
+      if (url.pathname === "/api/bundle" && req.method === "GET") {
         if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" });
         const me = await sessionUser(sessionToken(req));
         if (!me) return json(res, 401, { error: "not signed in" });
@@ -533,7 +537,8 @@ async function main() {
       // Presence: a handle is "online" if any of its devices currently holds a
       // live mailbox subscription. Signed-in callers only, so it is not an open
       // presence oracle. Kept coarse (per handle, no timestamps).
-      if (url.pathname === "/api/presence") {
+      if (url.pathname === "/api/presence" && req.method === "GET") {
+        if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" }); // per-IP backstop (pentest R-2), on top of the per-account budget below
         const username = await sessionUser(sessionToken(req));
         if (!username) return json(res, 401, { error: "not signed in" });
         const handles = String(url.searchParams.get("handles") || "").toLowerCase().split(",").filter((h) => HANDLE_RE.test(h)).slice(0, 100);
@@ -558,7 +563,7 @@ async function main() {
       // (public STUN alone can't find a peer-to-peer path there). Empty
       // iceServers when no TURN server is configured; the client then just
       // stays on its built-in STUN servers as before.
-      if (url.pathname === "/api/turn-credentials") {
+      if (url.pathname === "/api/turn-credentials" && req.method === "GET") {
         if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" });
         const username = await sessionUser(sessionToken(req));
         if (!username) return json(res, 401, { error: "not signed in" });
@@ -611,7 +616,7 @@ async function main() {
       // but an id that leaks (a log line, a forwarded transcript, a scraped
       // backup) otherwise granted permanent anonymous access to the exact
       // ciphertext length, which fingerprints known files.
-      if (url.pathname === "/api/file") {
+      if (url.pathname === "/api/file" && req.method === "GET") {
         if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" });
         if (!(await sessionUser(sessionToken(req)))) return json(res, 401, { error: "not signed in" });
         const id = String(url.searchParams.get("id") || "");
