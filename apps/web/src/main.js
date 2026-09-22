@@ -853,7 +853,9 @@ async function decryptBytes(keyRaw, blob) {
 // ~3x, which is what made big videos silently die on low-memory phones.
 // Format: [0x01][chunkSize:u32 BE] then per chunk [iv:12][AES-GCM(ct+tag)].
 const ENC_CHUNK = 4 * 1024 * 1024;
-async function encryptFileChunked(keyRaw, file) {
+// onProgress (optional) is called with a 0..1 fraction after each chunk is
+// encrypted, so the caller can drive an upload/encrypt progress bar.
+async function encryptFileChunked(keyRaw, file, onProgress) {
   const key = await crypto.subtle.importKey("raw", keyRaw, { name: "AES-GCM" }, false, ["encrypt"]);
   const size = file.size;
   const nChunks = Math.max(1, Math.ceil(size / ENC_CHUNK));
@@ -865,9 +867,58 @@ async function encryptFileChunked(keyRaw, file) {
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, slice));
     out.set(iv, off); off += 12; out.set(ct, off); off += ct.length;
+    if (onProgress) onProgress(size === 0 ? 1 : Math.min(start + ENC_CHUNK, size) / size);
     if (size === 0) break;
   }
   return out.subarray(0, off);
+}
+// A tiny fixed progress panel for encrypt+upload. Created on demand (like the
+// lightbox) so index.html needs no extra markup.
+const xfer = {
+  el: null,
+  ensure() {
+    if (!this.el) {
+      const d = document.createElement("div");
+      d.id = "xfer"; d.className = "xfer"; d.hidden = true;
+      d.innerHTML = `<div class="xfer-row"><span class="xfer-label"></span><span class="xfer-pct"></span></div><div class="xfer-track"><div class="xfer-bar"></div></div>`;
+      document.body.appendChild(d);
+      this.el = d;
+    }
+    return this.el;
+  },
+  set(label, frac) {
+    const el = this.ensure();
+    el.hidden = false;
+    const pct = Math.max(0, Math.min(100, Math.round((frac || 0) * 100)));
+    el.querySelector(".xfer-label").textContent = label;
+    el.querySelector(".xfer-pct").textContent = pct + "%";
+    el.querySelector(".xfer-bar").style.width = pct + "%";
+    requestAnimationFrame(() => el.classList.add("show"));
+  },
+  hide() {
+    if (!this.el) return;
+    const el = this.el;
+    el.classList.remove("show");
+    setTimeout(() => { el.hidden = true; }, 250);
+  },
+};
+// POST with real upload-progress reporting. fetch() cannot report how many
+// bytes of the request body have gone out yet, so the upload phase uses XHR,
+// whose upload.onprogress gives us the byte counter we need for the bar.
+function uploadWithProgress(url, headers, body, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    for (const k in headers) xhr.setRequestHeader(k, headers[k]);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); };
+    xhr.onload = () => {
+      let j = {}; try { j = JSON.parse(xhr.responseText || "{}"); } catch { /* non-JSON body */ }
+      resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, json: j });
+    };
+    xhr.onerror = () => reject(new Error("network"));
+    xhr.onabort = () => reject(new Error("aborted"));
+    xhr.send(body);
+  });
 }
 // Decrypt a chunked blob into a Blob, decoding chunk by chunk so we never hold
 // two full copies of the payload at once.
@@ -888,10 +939,13 @@ async function sendFile(file, expireSec = 0) {
   if (!state.active) return;
   if (file.size > MAX_FILE_BYTES) { toast("file too large (max 500 MB)"); return; }
   const target = state.active;
-  toast("encrypting & uploading…");
+  // Only worth a progress panel for files big enough to have a visible delay;
+  // tiny ones just flash a toast as before.
+  const showBar = file.size > 512 * 1024;
+  if (showBar) xfer.set("Encrypting…", 0); else toast("encrypting & uploading…");
   try {
     const keyRaw = crypto.getRandomValues(new Uint8Array(32));
-    const enc = await encryptFileChunked(keyRaw, file);
+    const enc = await encryptFileChunked(keyRaw, file, showBar ? (f) => xfer.set("Encrypting…", f) : null);
     const mime = fileMime(file);
     // The media type is not sent alongside the ciphertext: it travels inside
     // the encrypted message as fileMeta.mime below, which is where the reader
@@ -899,13 +953,15 @@ async function sendFile(file, expireSec = 0) {
     // of file each opaque blob is, for no benefit.
     const headers = { "content-type": "application/octet-stream", Authorization: "Bearer " + state.token };
     if (expireSec > 0) headers["x-expire-sec"] = String(expireSec);
-    const r = await fetch("/api/upload", { method: "POST", headers, body: enc });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok || !j.id) { toast(j.error || "upload failed"); return; }
+    if (showBar) xfer.set("Uploading…", 0);
+    const up = await uploadWithProgress("/api/upload", headers, enc, showBar ? (f) => xfer.set("Uploading…", f) : null);
+    if (showBar) xfer.hide();
+    const j = up.json || {};
+    if (!up.ok || !j.id) { toast(j.error || "upload failed"); return; }
     const fileMeta = { name: truncateFilename(file.name, 120), mime, size: file.size, id: j.id, key: toB64(keyRaw), enc: "c1" };
     if (expireSec > 0) fileMeta.expireAt = Date.now() + expireSec * 1000;
     await deliverContent(target, "", { file: fileMeta });
-  } catch { toast("could not send file"); }
+  } catch { if (showBar) xfer.hide(); toast("could not send file"); }
 }
 
 // Auto-delete durations offered for media attachments (image / video / audio).

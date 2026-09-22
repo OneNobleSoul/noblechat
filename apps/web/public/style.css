@@ -200,6 +200,13 @@ body.lb-open{overflow:hidden}
 .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(16px);z-index:40;background:#0c111a;border:1px solid var(--line);color:var(--text);font-family:var(--mono);font-size:13px;padding:11px 18px;border-radius:10px;opacity:0;transition:.25s}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .toast[hidden]{display:none}
+.xfer{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(16px);z-index:41;width:min(320px,calc(100vw - 44px));background:#0c111a;border:1px solid var(--line);color:var(--text);font-family:var(--mono);font-size:12px;padding:11px 14px;border-radius:10px;opacity:0;transition:.25s}
+.xfer.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.xfer[hidden]{display:none}
+.xfer-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.xfer-pct{font-variant-numeric:tabular-nums;color:var(--muted,#8b98a9)}
+.xfer-track{height:5px;border-radius:3px;background:#1a2230;overflow:hidden}
+.xfer-bar{height:100%;width:0;border-radius:3px;background:var(--accent,#4f8cff);transition:width .2s ease}
 
 /* icon buttons + popup menu (mute/block/delete) */
 .icon-btn{background:transparent;border:0;color:var(--muted);font-size:22px;line-height:1;padding:4px 8px;border-radius:8px;cursor:pointer}
