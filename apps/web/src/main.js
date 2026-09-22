@@ -1121,8 +1121,11 @@ function renderContacts() {
     const dot = `<span class="dot ${on ? "on" : "off"}" title="${on ? "online" : "offline"}"></span>`;
     const dn = displayName(h); const col = profileColor(h); const named = dn !== h;
     const sub = named ? `@${esc(h)} · ${on ? "online" : "offline"}` : (on ? "online" : "offline");
+    const av = profileAvatar(h); const avUrl = av && _imgCache.get(av.id); if (av && !avUrl) scheduleImg(av, renderContacts);
+    const avInner = avUrl ? `<img class="avatar-img" src="${avUrl}" alt="" draggable="false">` : esc(dn[0] || "?").toUpperCase();
+    const avStyle = (!avUrl && col) ? ` style="background:${col}"` : "";
     html += `<div class="contact ${h === state.active ? "active" : ""} ${unread ? "has-unread" : ""}" data-h="${esc(h)}">
-      <div class="avatar"${col ? ` style="background:${col}"` : ""}>${esc(dn[0] || "?").toUpperCase()}${dot}</div>
+      <div class="avatar"${avStyle}>${avInner}${dot}</div>
       <div class="c-main"><div class="h">${esc(dn)} ${muteIcon}${isUnverified(h) ? `<span class="mini-icon warn" title="security keys changed - verify">⚠</span>` : ""}</div><div class="s">${sub}</div></div>
       ${badge}
       <button class="row-menu" data-menu="${esc(h)}" title="Options" aria-label="Options">⋮</button>
@@ -1352,6 +1355,8 @@ document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   const lb = document.getElementById("lightbox");
   if (lb && !lb.hidden) { closeLightbox(); return; }
+  const pvm = document.getElementById("profile-modal");
+  if (pvm && !pvm.hidden) { closeProfileView(); return; }
   const stm = document.getElementById("settings-modal");
   if (stm && !stm.hidden) { closeSettings(); return; }
   const gm = document.getElementById("group-modal");
@@ -1406,6 +1411,8 @@ function openSettings() {
   const n = $("#set-name"); if (n) n.value = state.profile.name || "";
   const b = $("#set-bio"); if (b) b.value = state.profile.bio || "";
   const c = $("#set-color"); if (c) c.value = state.profile.color || "#5eead4";
+  state._pendingAvatar = state._pendingBanner = null; state._avatarRemoved = state._bannerRemoved = false;
+  renderOwnProfilePreview();
   m.hidden = false;
 }
 function closeSettings() { const m = $("#settings-modal"); if (m) m.hidden = true; }
@@ -1481,15 +1488,98 @@ async function broadcastProfile() {
   for (const card of state.myBundle) if (toB64(card.mailbox) !== mine) sendToCard(card, { v: 1, from: state.user, id, ts: Date.now(), to: state.user, t: "profile", profile: state.profile });
   markSeen(id);
 }
-function saveProfile() {
+// Encrypt+upload an avatar/banner image, returning a file descriptor to embed
+// in the profile. Same ciphertext pipeline as chat attachments: the server only
+// ever holds an opaque blob; the key travels inside the encrypted profile.
+const PROFILE_IMG_MAX = 6 * 1024 * 1024;
+async function uploadProfileImage(file) {
+  if (!file || !String(file.type).startsWith("image/")) throw new Error("not an image");
+  if (file.size > PROFILE_IMG_MAX) throw new Error("image too large");
+  const keyRaw = crypto.getRandomValues(new Uint8Array(32));
+  const enc = await encryptFileChunked(keyRaw, file);
+  const r = await fetch("/api/upload", { method: "POST", headers: { "content-type": "application/octet-stream", Authorization: "Bearer " + state.token }, body: enc });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.id) throw new Error("upload failed");
+  return { name: truncateFilename(file.name, 120), mime: fileMime(file), size: file.size, id: j.id, key: toB64(keyRaw), enc: "c1" };
+}
+// Decrypt a profile image to a blob URL, cached by ciphertext id.
+const _imgCache = new Map(); const _imgResolving = new Set();
+async function resolveProfileImage(fm) {
+  if (!fm || !fm.id) return null;
+  if (_imgCache.has(fm.id)) return _imgCache.get(fm.id);
+  try {
+    const r = await authFetch(`/api/file?id=${encodeURIComponent(fm.id)}`);
+    if (!r.ok) return null;
+    const buf = await r.arrayBuffer();
+    const blob = fm.enc === "c1"
+      ? await decryptChunkedToBlob(fromB64(fm.key), buf, fm.mime)
+      : new Blob([await decryptBytes(fromB64(fm.key), buf)], { type: fm.mime || "application/octet-stream" });
+    const url = URL.createObjectURL(blob); _imgCache.set(fm.id, url); return url;
+  } catch { return null; }
+}
+// Kick a lazy decrypt then re-render once it lands (used from render paths).
+function scheduleImg(fm, after) {
+  if (!fm || !fm.id || _imgCache.has(fm.id) || _imgResolving.has(fm.id)) return;
+  _imgResolving.add(fm.id);
+  resolveProfileImage(fm).then((url) => { _imgResolving.delete(fm.id); if (url && after) after(); });
+}
+function ownAvatar() { return state.profile && state.profile.avatar; }
+function pendingImg(kind) { return kind === "avatar" ? state._pendingAvatar : state._pendingBanner; }
+async function saveProfile() {
   const name = $("#set-name") ? $("#set-name").value : "";
   const bio = $("#set-bio") ? $("#set-bio").value : "";
   const color = $("#set-color") ? $("#set-color").value : "";
-  state.profile = normalizeProfile({ name, bio, color, updatedAt: Date.now() }) || { updatedAt: Date.now() };
-  uploadContactsBlob(); broadcastProfile(); renderContacts();
+  const prof = normalizeProfile({ name, bio, color, updatedAt: Date.now() }) || { updatedAt: Date.now() };
+  // keep existing images unless a new file was chosen or a removal was requested
+  if (state.profile.avatar && !state._avatarRemoved) prof.avatar = state.profile.avatar;
+  if (state.profile.banner && !state._bannerRemoved) prof.banner = state.profile.banner;
+  const btn = $("#set-save-profile"); if (btn) btn.disabled = true;
+  try {
+    if (state._pendingAvatar) prof.avatar = await uploadProfileImage(state._pendingAvatar);
+    if (state._pendingBanner) prof.banner = await uploadProfileImage(state._pendingBanner);
+  } catch (e) { toast(String(e.message || "image upload failed")); if (btn) btn.disabled = false; return; }
+  state.profile = normalizeProfile(prof) || prof;
+  state._pendingAvatar = state._pendingBanner = null; state._avatarRemoved = state._bannerRemoved = false;
+  if (btn) btn.disabled = false;
+  uploadContactsBlob(); broadcastProfile(); renderContacts(); renderOwnProfilePreview();
   if (state.active) { const cw = $("#chat-with"); if (cw && !groupOfKey(state.active)) cw.textContent = displayName(state.active); }
   toast("profile saved");
 }
+// Contact profile fields, gated on verification.
+function profileAvatar(handle) { const p = !isUnverified(handle) && state.profiles.get(handle); return (p && p.avatar) ? p.avatar : null; }
+// Small preview of the current/pending images inside the settings panel.
+function renderOwnProfilePreview() {
+  const a = $("#set-avatar-prev"); if (a) {
+    const fm = state._avatarRemoved ? null : (state.profile.avatar || null);
+    if (state._pendingAvatar) { a.style.backgroundImage = `url(${URL.createObjectURL(state._pendingAvatar)})`; a.classList.add("has-img"); }
+    else if (fm) { const u = _imgCache.get(fm.id); if (u) { a.style.backgroundImage = `url(${u})`; a.classList.add("has-img"); } else scheduleImg(fm, renderOwnProfilePreview); }
+    else { a.style.backgroundImage = ""; a.classList.remove("has-img"); }
+  }
+  const b = $("#set-banner-prev"); if (b) {
+    const fm = state._bannerRemoved ? null : (state.profile.banner || null);
+    if (state._pendingBanner) { b.style.backgroundImage = `url(${URL.createObjectURL(state._pendingBanner)})`; b.classList.add("has-img"); }
+    else if (fm) { const u = _imgCache.get(fm.id); if (u) { b.style.backgroundImage = `url(${u})`; b.classList.add("has-img"); } else scheduleImg(fm, renderOwnProfilePreview); }
+    else { b.style.backgroundImage = ""; b.classList.remove("has-img"); }
+  }
+}
+// Full profile view for a contact (banner + avatar + name + bio), from the head.
+function openProfileView(handle) {
+  if (!handle || groupOfKey(handle)) return;
+  const m = $("#profile-modal"); if (!m) return;
+  const p = !isUnverified(handle) ? (state.profiles.get(handle) || {}) : {};
+  $("#pv-name").textContent = displayName(handle);
+  $("#pv-handle").textContent = "@" + handle;
+  const bio = $("#pv-bio"); bio.textContent = p.bio || ""; bio.hidden = !p.bio;
+  const av = $("#pv-avatar"); const bn = $("#pv-banner");
+  av.style.backgroundImage = ""; av.textContent = (displayName(handle)[0] || "?").toUpperCase();
+  av.style.background = profileColor(handle) || "";
+  bn.style.backgroundImage = "";
+  const reopen = () => { const mm = $("#profile-modal"); if (mm && !mm.hidden && state.active === handle) openProfileView(handle); };
+  if (p.avatar) { const u = _imgCache.get(p.avatar.id); if (u) { av.style.backgroundImage = `url(${u})`; av.textContent = ""; } else scheduleImg(p.avatar, reopen); }
+  if (p.banner) { const u = _imgCache.get(p.banner.id); if (u) bn.style.backgroundImage = `url(${u})`; else scheduleImg(p.banner, reopen); }
+  m.hidden = false;
+}
+function closeProfileView() { const m = $("#profile-modal"); if (m) m.hidden = true; }
 
 // ---------- mix viz ----------
 function buildNetViz() {
@@ -1762,6 +1852,12 @@ function wireUI() {
   const setw = $("#set-wipe"); if (setw) setw.addEventListener("click", panicWipe);
   const setdel = $("#set-delete"); if (setdel) setdel.addEventListener("click", deleteAccountFlow);
   const setsp = $("#set-save-profile"); if (setsp) setsp.addEventListener("click", saveProfile);
+  const setaf = $("#set-avatar-file"); if (setaf) setaf.addEventListener("change", (e) => { const f = e.target.files && e.target.files[0]; if (f) { state._pendingAvatar = f; state._avatarRemoved = false; renderOwnProfilePreview(); } });
+  const setbf = $("#set-banner-file"); if (setbf) setbf.addEventListener("change", (e) => { const f = e.target.files && e.target.files[0]; if (f) { state._pendingBanner = f; state._bannerRemoved = false; renderOwnProfilePreview(); } });
+  const setar = $("#set-avatar-remove"); if (setar) setar.addEventListener("click", () => { state._pendingAvatar = null; state._avatarRemoved = true; renderOwnProfilePreview(); });
+  const setbr = $("#set-banner-remove"); if (setbr) setbr.addEventListener("click", () => { state._pendingBanner = null; state._bannerRemoved = true; renderOwnProfilePreview(); });
+  const pvc = $("#pv-close"); if (pvc) pvc.addEventListener("click", closeProfileView);
+  const cwith = $("#chat-with"); if (cwith) cwith.addEventListener("click", () => { if (state.active && !groupOfKey(state.active)) openProfileView(state.active); });
   const snd = $("#sound-toggle"); if (snd) snd.addEventListener("click", toggleSound); renderSoundToggle();
   const back = $("#chat-back"); if (back) back.addEventListener("click", () => setMobileView("list"));
   const cmenu = $("#chat-menu"); if (cmenu) cmenu.addEventListener("click", (e) => { e.stopPropagation(); openChatMenu(); });

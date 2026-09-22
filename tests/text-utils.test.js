@@ -156,3 +156,15 @@ test("normalizeProfile clamps text, validates colour and drops junk", async () =
   assert.equal(bad.color, undefined); // invalid colour dropped
   assert.equal("bio" in bad, false); // empty bio omitted
 });
+
+test("normalizeProfile carries valid avatar/banner file descriptors", async () => {
+  const { normalizeProfile } = await import("../apps/web/src/text-utils.js");
+  const p = normalizeProfile({
+    name: "Bob",
+    avatar: { name: "a.jpg", mime: "image/jpeg", size: 1000, id: "abc", key: "k", enc: "c1" },
+    banner: { junk: true },
+  });
+  assert.equal(p.avatar.id, "abc");
+  assert.equal(p.avatar.mime, "image/jpeg");
+  assert.equal(p.banner, undefined); // junk descriptor dropped
+});
