@@ -1717,7 +1717,15 @@ function applyStatus(s) {
   if (s.transport && s.transport !== state.transport) { state.transport = s.transport; updateNetPanel(); }
   if (typeof s.nymAddress === "string") state.nymAddress = s.nymAddress;
   if (state.transport === "nym") ensureNymClient();
-  if (s.version) { if (state.version && s.version !== state.version) offerUpdate(); else if (!state.version) state.version = s.version; }
+  if (s.version) {
+    if (state.version && s.version !== state.version) offerUpdate(); else if (!state.version) state.version = s.version;
+    // Visible build tag so a change is obvious at a glance. This is APP_VERSION:
+    // the short git commit hash when the deploy passes one, otherwise a content
+    // hash of the front-end that moves on every change.
+    const bt = ensureEl("build-tag", "build-tag");
+    const v = String(s.version).slice(0, 10);
+    bt.textContent = "build " + v; bt.title = "NobleChat build " + s.version;
+  }
   const ann = String(s.announcement || "").trim(); const banner = ensureEl("nc-announce", "nc-announce");
   if (ann) { banner.textContent = "\u{1F4E2}  " + ann; banner.hidden = false; } else banner.hidden = true;
   state.maintenance = !!s.maintenance; const mo = ensureEl("nc-maint", "nc-maint");

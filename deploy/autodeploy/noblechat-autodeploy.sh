@@ -40,6 +40,10 @@ log "update: $local_sha -> $remote_sha, deploying"
 cd "$REPO_DIR"
 git fetch -q "$REMOTE_URL" "$BRANCH"
 git reset -q --hard FETCH_HEAD
+# Surface the deployed commit as the app version so clients show the real branch
+# hash. compose interpolates this into the gateway's APP_VERSION env at `up`.
+export APP_VERSION="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo dev)"
+log "deploying APP_VERSION=$APP_VERSION"
 gateway_ok() {
   docker inspect -f '{{.State.Running}}' noblechat 2>/dev/null | grep -q true \
     && docker exec noblechat node -e 'fetch("http://127.0.0.1:8790/healthz").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))' >/dev/null 2>&1

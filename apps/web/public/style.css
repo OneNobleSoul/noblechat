@@ -390,3 +390,5 @@ body.guard-blank .lightbox{background:#000}
   .net-flow .fd{animation:none}
   .gate.shake .gate-card{animation:none}
 }
+/* build/version tag: subtle, non-interactive, bottom-left corner */
+.build-tag{position:fixed;left:8px;bottom:6px;z-index:30;font-family:var(--mono);font-size:10px;letter-spacing:.5px;color:var(--dim);opacity:.55;pointer-events:none;user-select:none}
