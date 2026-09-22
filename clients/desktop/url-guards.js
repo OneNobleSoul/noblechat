@@ -17,4 +17,15 @@ function sameOrigin(url, origin) {
   }
 }
 
-module.exports = { isHttpUrl, sameOrigin };
+// Electron auto-approves every permission request (camera, mic, geolocation,
+// notifications, MIDI, HID, USB, ...) unless the app supplies a handler that
+// says otherwise. NobleChat only ever needs "media" (camera/microphone, for
+// voice/video calls), and only for its own page - everything else, and any
+// request from a page that isn't the app itself, gets refused.
+const ALLOWED_PERMISSIONS = new Set(["media"]);
+
+function permissionAllowed(permission, requestingUrl, appOrigin) {
+  return ALLOWED_PERMISSIONS.has(permission) && sameOrigin(requestingUrl, appOrigin);
+}
+
+module.exports = { isHttpUrl, sameOrigin, permissionAllowed };

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isHttpUrl, sameOrigin } from "../clients/desktop/url-guards.js";
+import { isHttpUrl, sameOrigin, permissionAllowed } from "../clients/desktop/url-guards.js";
 
 test("isHttpUrl accepts http and https", () => {
   assert.equal(isHttpUrl("https://chat.noblesoul.tech/app"), true);
@@ -33,4 +33,24 @@ test("sameOrigin is false for a different scheme or port", () => {
 
 test("sameOrigin rejects unparseable input instead of throwing", () => {
   assert.equal(sameOrigin("not a url", "https://chat.noblesoul.tech"), false);
+});
+
+test("permissionAllowed grants media (camera/mic) requests from the app's own origin", () => {
+  assert.equal(permissionAllowed("media", "https://chat.noblesoul.tech/app", "https://chat.noblesoul.tech"), true);
+});
+
+test("permissionAllowed refuses every other permission, even from the app's own origin", () => {
+  for (const p of ["geolocation", "notifications", "midi", "midiSysex", "hid", "usb", "serial", "clipboard-read", "pointerLock", "fullscreen"]) {
+    assert.equal(permissionAllowed(p, "https://chat.noblesoul.tech/app", "https://chat.noblesoul.tech"), false);
+  }
+});
+
+test("permissionAllowed refuses media requests from any other origin", () => {
+  assert.equal(permissionAllowed("media", "https://evil.example/app", "https://chat.noblesoul.tech"), false);
+  assert.equal(permissionAllowed("media", "http://chat.noblesoul.tech/app", "https://chat.noblesoul.tech"), false);
+});
+
+test("permissionAllowed refuses unparseable or missing requesting urls instead of throwing", () => {
+  assert.equal(permissionAllowed("media", "not a url", "https://chat.noblesoul.tech"), false);
+  assert.equal(permissionAllowed("media", undefined, "https://chat.noblesoul.tech"), false);
 });
