@@ -38,6 +38,11 @@ const CFG = {
   maxWsMsgBytes: Number(process.env.MAX_WS_MSG_BYTES || 128 * 1024),
   // 500 MB of plaintext + a little headroom for the AES-GCM iv/tag the client prepends.
   maxUploadBytes: Number(process.env.MAX_UPLOAD_BYTES || 501 * 1024 * 1024),
+  // Per-account attachment quota and a global free-space floor (pentest M-4):
+  // one open-registration account could otherwise fill the host disk, and since
+  // Postgres shares that disk it would take the whole service down.
+  maxAccountBytes: Number(process.env.MAX_ACCOUNT_BYTES || 2 * 1024 * 1024 * 1024),
+  minFreeBytes: Number(process.env.MIN_FREE_BYTES || 1024 * 1024 * 1024),
   // Attachment ciphertext lives here as plain files (streamed, never held in
   // memory or stuffed into Postgres). The compose file mounts a volume on it.
   filesDir: process.env.FILES_DIR || "data/files",
@@ -567,6 +572,10 @@ async function main() {
         const username = await sessionUser(sessionToken(req));
         if (!username) return json(res, 401, { error: "not signed in" });
         if (await store.isBanned(username)) return json(res, 403, { error: "account suspended" });
+        // Storage guards (pentest M-4). Reject up front if the account is already
+        // at its quota, or if the host disk is low, before streaming a new file.
+        if (await store.ownedBytes(username) >= CFG.maxAccountBytes) return json(res, 413, { error: "storage quota reached" });
+        try { const s = await fs.promises.statfs(CFG.filesDir); if (s.bsize * s.bavail < CFG.minFreeBytes) return json(res, 507, { error: "server storage full" }); } catch { /* statfs unavailable: skip the free-space guard */ }
         // The media type is NOT taken from the client any more. It used to be
         // stored verbatim from the x-file-type header, which meant the one
         // readable thing about an otherwise opaque attachment ("this is a PDF",
@@ -590,7 +599,10 @@ async function main() {
           return json(res, 500, { error: "upload failed" });
         }
         if (!size) { await fs.promises.unlink(store.filePath(id)).catch(() => {}); return json(res, 400, { error: "empty" }); }
-        try { await store.saveFileMeta(id, mime, size, expiresAt); }
+        // Post-stream quota check: the size is only known after streaming, so a
+        // single upload that pushes the account over its quota is rolled back.
+        if (await store.ownedBytes(username) + size > CFG.maxAccountBytes) { await fs.promises.unlink(store.filePath(id)).catch(() => {}); return json(res, 413, { error: "storage quota reached" }); }
+        try { await store.saveFileMeta(id, mime, size, expiresAt, username); }
         catch { await fs.promises.unlink(store.filePath(id)).catch(() => {}); return json(res, 500, { error: "store failed" }); }
         return json(res, 200, { id });
       }
