@@ -103,7 +103,9 @@ ALTER TABLE files ADD COLUMN IF NOT EXISTS expires_at BIGINT;
 -- legacy rows (kept readable), new rows record size + disk file instead
 ALTER TABLE files ALTER COLUMN data DROP NOT NULL;
 ALTER TABLE files ADD COLUMN IF NOT EXISTS size BIGINT;
+ALTER TABLE files ADD COLUMN IF NOT EXISTS owner TEXT;
 CREATE INDEX IF NOT EXISTS idx_files_created ON files (created_at);
+CREATE INDEX IF NOT EXISTS idx_files_owner ON files (owner);
 CREATE INDEX IF NOT EXISTS idx_files_expires ON files (expires_at);
 `;
 
@@ -319,8 +321,13 @@ export async function openStore(databaseUrl, { mailboxTtlMs = 7 * 24 * 3600 * 10
       if (!/^[a-f0-9]{1,64}$/.test(id)) throw new Error("bad file id");
       return path.join(filesDir, id);
     },
-    async saveFileMeta(id, mime, size, expiresAt = null) {
-      await pool.query("INSERT INTO files(id,mime,size,created_at,expires_at) VALUES($1,$2,$3,$4,$5)", [id, String(mime).slice(0, 100), size, now(), expiresAt]);
+    async saveFileMeta(id, mime, size, expiresAt = null, owner = null) {
+      await pool.query("INSERT INTO files(id,mime,size,created_at,expires_at,owner) VALUES($1,$2,$3,$4,$5,$6)", [id, String(mime).slice(0, 100), size, now(), expiresAt, owner]);
+    },
+    // Total ciphertext bytes currently owned by an account (pentest M-4 quota).
+    async ownedBytes(owner) {
+      const r = await pool.query("SELECT COALESCE(SUM(size),0)::bigint AS total FROM files WHERE owner=$1", [owner]);
+      return Number(r.rows[0] ? r.rows[0].total : 0);
     },
     async getFile(id) {
       const r = await pool.query("SELECT mime, data, size, expires_at FROM files WHERE id=$1", [id]);
@@ -355,6 +362,7 @@ export async function openStore(databaseUrl, { mailboxTtlMs = 7 * 24 * 3600 * 10
     },
     async deleteAccount(username) {
       const mbk = await this.deviceMbkeys(username);
+      await deleteFilesWhere("owner=$1", [username]); // pentest L-2: take the account's attachments (DB rows + disk) with it
       await pool.query("DELETE FROM sessions WHERE username=$1", [username]);
       await pool.query("DELETE FROM blobs WHERE username=$1", [username]);
       await pool.query("DELETE FROM settings WHERE key=$1", [`banreason:${username}`]); // don't leave a ban-reason row behind
