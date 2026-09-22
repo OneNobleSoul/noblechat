@@ -265,8 +265,16 @@ export async function openStore(databaseUrl, { mailboxTtlMs = 7 * 24 * 3600 * 10
 
     // ---- mailbox (durable queue) ----
     async pushEnvelope(mbkey, envB64) {
+      // Fail CLOSED at the cap (pentest N-01): refuse the new envelope instead of
+      // evicting the oldest. Anyone can inject into any mailbox over the mixnet
+      // (delivery is unauthenticated by design), and the old evict-oldest policy
+      // let 1000 injected envelopes silently destroy a victim's queued, not-yet-
+      // fetched messages. Dropping the newest under flood keeps real queued
+      // messages intact; a legitimately busy mailbox drains on reconnect.
+      const c = await pool.query("SELECT COUNT(*)::int AS n FROM mailbox WHERE mbkey=$1", [mbkey]);
+      if (c.rows[0].n >= maxPerMailbox) return false;
       await pool.query("INSERT INTO mailbox(mbkey,envelope,created_at) VALUES($1,$2,$3)", [mbkey, envB64, now()]);
-      await pool.query(`DELETE FROM mailbox WHERE mbkey=$1 AND id NOT IN (SELECT id FROM mailbox WHERE mbkey=$1 ORDER BY id DESC LIMIT $2)`, [mbkey, maxPerMailbox]);
+      return true;
     },
     async drainEnvelopes(mbkey, limit = 5000) {
       const r = await pool.query(
