@@ -28,8 +28,11 @@ explainer at `/info.html`.
 - Hybrid post-quantum key exchange (X25519 + ML-KEM-768) and hybrid signatures
   (Ed25519 + ML-DSA-65).
 - A real mix network: layered mix nodes and providers, Poisson mixing, constant
-  size packets, and cover traffic. Each node runs as its own process and only
-  ever learns its own hop.
+  size packets, and cover traffic. Each node runs as its own process and, against
+  a network observer, only ever learns its own hop. (Note: the internal fleet
+  currently derives all node keys from one shared seed, so it is not operator
+  blind yet; see the pentest note in `apps/node/node.js`. The public Nym mixnet
+  is the operator-independent option.)
 - A zero-knowledge gateway: it only handles opaque onion packets, a mailbox id,
   public contact cards, a password hash, and an opaque (client encrypted)
   contacts blob.

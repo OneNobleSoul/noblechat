@@ -1,8 +1,15 @@
-// A single NobleChat mix node. It holds exactly ONE node's secret key. It peels
-// one Sphinx layer off each packet it receives, waits an exponentially
-// distributed delay (Poisson mixing), then forwards to the NEXT node over the
-// network. A node never learns more than its own hop: the previous sender and
-// the next hop, nothing about the rest of the path or the content.
+// A single NobleChat mix node. It peels one Sphinx layer off each packet it
+// receives, waits an exponentially distributed delay (Poisson mixing), then
+// forwards to the NEXT node over the network. Cryptographically a node only ever
+// learns its own hop (previous sender + next hop), nothing about the rest of the
+// path or the content.
+//
+// CAVEAT (see pentest H-1, 2026-09-22): in the current internal deployment every
+// node derives its key deterministically from a single shared NET_SEED, so any
+// process holding that seed can reconstruct all node keys. The per-hop guarantee
+// therefore holds against a network observer between nodes, NOT against whoever
+// holds the seed (the operator). Real per-node keypairs are needed before the
+// internal transport can be relied on for operator-blind unlinkability.
 import http from "node:http";
 import crypto from "node:crypto";
 import { buildTestnet } from "../../packages/net/src/directory.js";

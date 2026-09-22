@@ -1943,8 +1943,8 @@ function updateNetPanel() {
   // honestly instead of a dead diagram.
   if (layers) layers.classList.toggle("dim", t === "nym");
   if (note) note.textContent = t === "nym"
-    ? "Routing anonymously through the public Nym mixnet. Sender, timing and route are hidden even from this server."
-    : "Every packet is the same size and equally opaque. The server can't tell a message from cover traffic.";
+    ? "Sending is routed through the public Nym mixnet. Receiving still runs over this server, so it can see which account is online and receiving."
+    : "Every packet is the same size and equally opaque to anyone watching the network between the nodes.";
 }
 function applyStatus(s) {
   if (s.transport && s.transport !== state.transport) { state.transport = s.transport; updateNetPanel(); }
