@@ -35,8 +35,11 @@ input{font-family:var(--sans)}
 .fine{color:var(--dim);font-size:12px;line-height:1.5;margin:16px 0 0}
 
 /* app layout */
-.app{display:grid;grid-template-columns:300px 1fr;grid-template-rows:56px 1fr;height:100vh}
-.topbar{grid-column:1/3;display:flex;align-items:center;gap:16px;padding:0 20px;border-bottom:1px solid var(--line);background:rgba(6,8,12,.7);backdrop-filter:blur(10px)}
+.app{display:grid;grid-template-columns:300px 1fr;grid-template-rows:auto 1fr;height:100vh;height:100dvh}
+/* pad the topbar down by the device safe area (status bar clock, camera notch)
+   so the OS overlay never sits on top of the brand and controls; left/right
+   insets cover a landscape notch */
+.topbar{grid-column:1/3;display:flex;align-items:center;gap:16px;min-height:56px;padding:env(safe-area-inset-top) calc(20px + env(safe-area-inset-right)) 0 calc(20px + env(safe-area-inset-left));border-bottom:1px solid var(--line);background:rgba(6,8,12,.7);backdrop-filter:blur(10px)}
 .brand{font-family:var(--mono);font-weight:700}
 .brand::first-letter{color:var(--accent)}
 .me{color:var(--muted);font-size:13px}
@@ -266,12 +269,12 @@ body.guard-blank .lightbox{background:#000}
   /* minmax(0,1fr) (not 1fr) keeps the single column within the viewport instead
      of growing to its content's min width, which was overflowing the whole app
      to the right. Topbar spans that one column, not to a phantom second one. */
-  .app{grid-template-columns:minmax(0,1fr);grid-template-rows:52px 1fr}
-  .topbar{grid-column:1;gap:10px;padding:0 12px;min-width:0}
+  .app{grid-template-columns:minmax(0,1fr);grid-template-rows:auto 1fr}
+  .topbar{grid-column:1;gap:10px;min-height:52px;padding:env(safe-area-inset-top) calc(12px + env(safe-area-inset-right)) 0 calc(12px + env(safe-area-inset-left));min-width:0}
   .me,.hide-sm,.pill.secure{display:none}
   .top-right{gap:6px}
   .pill{padding:6px 10px}
-  .composer{gap:6px;padding-left:10px;padding-right:10px}
+  .composer{gap:6px;padding-left:calc(10px + env(safe-area-inset-left));padding-right:calc(10px + env(safe-area-inset-right));padding-bottom:calc(14px + env(safe-area-inset-bottom))}
   #emoji-btn,#attach-btn{font-size:20px;padding:4px 5px}
   /* one-pane-at-a-time: the sidebar is the list view, the chat overlays it */
   .sidebar{grid-column:1;grid-row:2;border-right:0;min-width:0}
@@ -391,4 +394,4 @@ body.guard-blank .lightbox{background:#000}
   .gate.shake .gate-card{animation:none}
 }
 /* build/version tag: subtle, non-interactive, bottom-left corner */
-.build-tag{position:fixed;left:8px;bottom:6px;z-index:30;font-family:var(--mono);font-size:10px;letter-spacing:.5px;color:var(--dim);opacity:.55;pointer-events:none;user-select:none}
+.build-tag{position:fixed;left:calc(8px + env(safe-area-inset-left));bottom:calc(6px + env(safe-area-inset-bottom));z-index:30;font-family:var(--mono);font-size:10px;letter-spacing:.5px;color:var(--dim);opacity:.55;pointer-events:none;user-select:none}
