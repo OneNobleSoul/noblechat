@@ -33,6 +33,9 @@ services:
     environment:
       PORT: "8790"
       MEAN_DELAY_MS: "60"
+      # Short git commit hash, set by the autodeploy script at deploy time. When
+      # empty (local runs) the server falls back to a content hash of the build.
+      APP_VERSION: ${APP_VERSION:-}
       NET_SEED: ${NET_SEED}
       DATABASE_URL: ${DATABASE_URL}
       ADMIN_TOKEN: ${ADMIN_TOKEN}
