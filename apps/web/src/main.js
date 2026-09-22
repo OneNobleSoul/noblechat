@@ -167,6 +167,32 @@ async function loadBlobKey() {
   } catch { ls.del(K.bkey); return null; }
 }
 
+// ---------- identity at rest (pentest H-2) ----------
+// The identity holds the long-term private keys (X25519/Ed25519/ML-KEM/ML-DSA):
+// the single most valuable secret on the device, since it decrypts everything
+// and can sign as the user forever. It used to sit in localStorage as plaintext
+// next to the token, so one read (XSS, a rogue extension, a copied profile) took
+// it permanently. It is now stored encrypted under the non-extractable blob key
+// (the same key that already protects the contacts blob, held as an opaque
+// IndexedDB handle), so an attacker needs script execution AT USE TIME with the
+// key, not a one-shot dump. The blob key is re-derivable from the password, so a
+// lost IndexedDB just means signing in again, never a lost identity.
+// A legacy plaintext value is JSON ("{...}"); an encrypted one is base64.
+function isEncryptedIdentity(raw) { return typeof raw === "string" && raw.length > 0 && raw[0] !== "{"; }
+async function loadIdentityFrom(raw) {
+  if (isEncryptedIdentity(raw)) {
+    if (!state.blobKey) throw new Error("no key for encrypted identity");
+    return deserializeIdentity(await decryptBlob(state.blobKey, raw));
+  }
+  return deserializeIdentity(JSON.parse(raw)); // legacy plaintext, migrated on save
+}
+async function saveIdentity(id) {
+  const ser = serializeIdentity(id);
+  // Encrypt when we have the key; without it (IndexedDB blocked) fall back to
+  // plaintext so the account still works, and migrate at the next password login.
+  ls.set(K.id, state.blobKey ? await encryptBlob(state.blobKey, ser) : JSON.stringify(ser));
+}
+
 // ---------- init / auto-login ----------
 async function init() {
   const { view, meanDelayMs } = await (await fetch("/api/net")).json();
@@ -177,8 +203,9 @@ async function init() {
   if (token && user && idRaw && dev) {
     try {
       state.token = token; state.user = user; state.deviceId = dev;
-      state.identity = deserializeIdentity(JSON.parse(idRaw));
-      state.blobKey = await loadBlobKey();
+      state.blobKey = await loadBlobKey();              // key first: the identity may be encrypted under it
+      state.identity = await loadIdentityFrom(idRaw);
+      if (!isEncryptedIdentity(idRaw) && state.blobKey) await saveIdentity(state.identity); // migrate a legacy plaintext identity to encrypted
       if (!state.net.providers.some((p) => toB64(p.id) === toB64(state.identity.providerId))) throw new Error("stale-net");
       await registerDevice(); // 401 if the session expired
       await afterAuth();
@@ -259,23 +286,8 @@ async function doAuth() {
 
     state.token = j.token; state.user = user;
     ls.set(K.token, j.token); ls.set(K.user, user);
-    // Reuse this browser's device identity (keypair + deviceId) only when the
-    // stored keypair belongs to this handle, so logging back in updates the
-    // same device row rather than spawning a new one. A different handle - or
-    // a first login - gets a fresh deviceId and keypair.
-    let id = null; const idRaw = ls.get(K.id);
-    if (idRaw) { try { const cand = deserializeIdentity(JSON.parse(idRaw)); if (cand.handle === user && state.net.providers.some((p) => toB64(p.id) === toB64(cand.providerId))) id = cand; } catch { /* */ } }
-    if (id) {
-      state.deviceId = ls.get(K.dev) || randHex(16);
-    } else {
-      state.deviceId = randHex(16); // fresh device for a new handle on this browser
-      showKeygen(0, "starting");
-      const provider = state.net.providers[simpleHash(user) % state.net.providers.length];
-      id = await generateIdentityStaged(user, provider.id, (p, l) => showKeygen(p, l));
-      ls.set(K.id, JSON.stringify(serializeIdentity(id)));
-    }
-    ls.set(K.dev, state.deviceId);
-    state.identity = id;
+    // Derive the blob key up front: the stored identity may be encrypted under
+    // it, and a freshly generated one is stored encrypted too (pentest H-2).
     state.blobKey = await deriveBlobKey(pass, user);
     await putKey(BLOB_KEY_NAME, state.blobKey);
     ls.del(K.bkey); // in case an older build left an exported copy behind
@@ -283,6 +295,24 @@ async function doAuth() {
     // and migrate any blobs written before the 600k bump. Auto-login (no
     // password) skips this: its cached key already matches its stored blobs.
     state.blobKeyLegacy = await deriveBlobKey(pass, user, PBKDF2_LEGACY);
+    // Reuse this browser's device identity (keypair + deviceId) only when the
+    // stored keypair belongs to this handle, so logging back in updates the
+    // same device row rather than spawning a new one. A different handle - or
+    // a first login - gets a fresh deviceId and keypair. A stored identity from
+    // another handle won't decrypt under this key, which enforces that too.
+    let id = null; const idRaw = ls.get(K.id);
+    if (idRaw) { try { const cand = await loadIdentityFrom(idRaw); if (cand.handle === user && state.net.providers.some((p) => toB64(p.id) === toB64(cand.providerId))) id = cand; } catch { /* */ } }
+    if (id) {
+      state.deviceId = ls.get(K.dev) || randHex(16);
+    } else {
+      state.deviceId = randHex(16); // fresh device for a new handle on this browser
+      showKeygen(0, "starting");
+      const provider = state.net.providers[simpleHash(user) % state.net.providers.length];
+      id = await generateIdentityStaged(user, provider.id, (p, l) => showKeygen(p, l));
+    }
+    ls.set(K.dev, state.deviceId);
+    state.identity = id;
+    await saveIdentity(id); // encrypted at rest; also migrates a reused legacy plaintext identity
 
     await registerDevice();
     await afterAuth();
