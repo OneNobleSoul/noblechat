@@ -40,3 +40,14 @@ test("turnIceServers returns one entry with fresh time-limited credentials", () 
   assert.ok(servers[0].username.endsWith(":noblechat"));
   assert.ok(servers[0].credential.length > 0);
 });
+
+test("turnCredentials folds an account label into the username for attribution", () => {
+  const now = 1_700_000_000_000;
+  const { username, credential } = turnCredentials("shared", 600, now, "alice");
+  const expiry = Math.floor(now / 1000) + 600;
+  assert.equal(username, `${expiry}:alice`);
+  assert.equal(credential, crypto.createHmac("sha1", "shared").update(username).digest("base64"));
+  // a colon in the label can't smuggle a second field / fake expiry
+  const u2 = turnCredentials("shared", 600, now, "a:b").username;
+  assert.equal(u2, `${expiry}:ab`);
+});

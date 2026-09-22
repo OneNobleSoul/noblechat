@@ -168,3 +168,14 @@ test("normalizeProfile carries valid avatar/banner file descriptors", async () =
   assert.equal(p.avatar.mime, "image/jpeg");
   assert.equal(p.banner, undefined); // junk descriptor dropped
 });
+
+test("normalizeReply clamps an inbound reply quote and drops junk", async () => {
+  const { normalizeReply } = await import("../apps/web/src/text-utils.js");
+  assert.equal(normalizeReply(null), undefined);
+  assert.equal(normalizeReply({}), undefined);
+  const r = normalizeReply({ from: "a".repeat(200), preview: "b".repeat(999), id: 12345, extra: "x" });
+  assert.equal(r.from.length, 64);
+  assert.equal(r.preview.length, 200);
+  assert.equal(r.id, "12345");
+  assert.equal("extra" in r, false); // unknown fields dropped
+});

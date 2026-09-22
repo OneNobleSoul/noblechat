@@ -546,7 +546,7 @@ async function main() {
         if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" });
         const username = await sessionUser(sessionToken(req));
         if (!username) return json(res, 401, { error: "not signed in" });
-        return json(res, 200, { iceServers: turnIceServers(CFG) });
+        return json(res, 200, { iceServers: turnIceServers(CFG, Date.now(), username) });
       }
       // Encrypted attachment upload/download. The body is opaque ciphertext the
       // client encrypted locally; the decryption key travels only inside the

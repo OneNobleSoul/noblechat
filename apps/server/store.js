@@ -267,6 +267,9 @@ export async function openStore(databaseUrl, { mailboxTtlMs = 7 * 24 * 3600 * 10
     async prune() {
       await pool.query("DELETE FROM mailbox WHERE created_at < $1", [now() - mailboxTtlMs]);
       await deleteFilesWhere("created_at < $1", [now() - mailboxTtlMs]);
+      // Expired sessions were only cleared lazily on lookup, so the table grew
+      // unbounded (pentest L-3). Sweep them on the hourly prune.
+      await pool.query("DELETE FROM sessions WHERE expires_at < $1", [now()]);
       await this.pruneExpiredFiles();
       await this.reconcileOrphanFiles();
     },
