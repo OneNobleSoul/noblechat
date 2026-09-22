@@ -393,5 +393,7 @@ body.guard-blank .lightbox{background:#000}
   .net-flow .fd{animation:none}
   .gate.shake .gate-card{animation:none}
 }
-/* build/version tag: subtle, non-interactive, bottom-left corner */
-.build-tag{position:fixed;left:calc(8px + env(safe-area-inset-left));bottom:calc(6px + env(safe-area-inset-bottom));z-index:30;font-family:var(--mono);font-size:10px;letter-spacing:.5px;color:var(--dim);opacity:.55;pointer-events:none;user-select:none}
+/* build/version tag: a quiet last line inside the network panel (in normal
+   flow, so it never overlaps the note or the "how it works" link) */
+.build-tag{margin-top:8px;font-family:var(--mono);font-size:10px;letter-spacing:.5px;color:var(--dim);opacity:.55;user-select:none}
+.build-tag:empty{display:none}

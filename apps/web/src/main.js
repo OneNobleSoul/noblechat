@@ -1721,10 +1721,10 @@ function applyStatus(s) {
     if (state.version && s.version !== state.version) offerUpdate(); else if (!state.version) state.version = s.version;
     // Visible build tag so a change is obvious at a glance. This is APP_VERSION:
     // the short git commit hash when the deploy passes one, otherwise a content
-    // hash of the front-end that moves on every change.
-    const bt = ensureEl("build-tag", "build-tag");
-    const v = String(s.version).slice(0, 10);
-    bt.textContent = "build " + v; bt.title = "NobleChat build " + s.version;
+    // hash of the front-end that moves on every change. The element lives in the
+    // network panel markup, so we only fill it (never float one over the UI).
+    const bt = document.getElementById("build-tag");
+    if (bt) { bt.textContent = "build " + String(s.version).slice(0, 10); bt.title = "NobleChat build " + s.version; }
   }
   const ann = String(s.announcement || "").trim(); const banner = ensureEl("nc-announce", "nc-announce");
   if (ann) { banner.textContent = "\u{1F4E2}  " + ann; banner.hidden = false; } else banner.hidden = true;
