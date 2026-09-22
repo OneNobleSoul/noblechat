@@ -113,3 +113,17 @@ export function normalizeProfile(p) {
   const bn = normalizeFile(p.banner); if (bn && bn.id && bn.key) out.banner = bn;
   return out;
 }
+
+// Clamp an inbound replyTo quote from a peer before it is stored/rendered.
+// Unlike file/profile it was previously taken verbatim (pentest L-8); it is
+// escaped at render time so this is a size guard, not an XSS fix.
+export function normalizeReply(r) {
+  if (!r || typeof r !== "object") return undefined;
+  const from = String(r.from == null ? "" : r.from).slice(0, 64);
+  const preview = String(r.preview == null ? "" : r.preview).slice(0, 200);
+  const out = {};
+  if (from) out.from = from;
+  if (preview) out.preview = preview;
+  if (r.id != null) out.id = String(r.id).slice(0, 64);
+  return (out.from || out.preview || out.id) ? out : undefined;
+}

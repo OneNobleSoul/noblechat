@@ -40,3 +40,16 @@ test("turnIceServers returns one entry with fresh time-limited credentials", () 
   assert.ok(servers[0].username.endsWith(":noblechat"));
   assert.ok(servers[0].credential.length > 0);
 });
+
+test("turnCredentials folds an account label into the username for attribution", () => {
+  const now = 1_700_000_000_000;
+  const a = turnCredentials("shared", 600, now, "alice");
+  const expiry = Math.floor(now / 1000) + 600;
+  assert.equal(a.username, `${expiry}:alice`);
+  // deterministic for the same inputs (coturn derives the same value its side)
+  assert.equal(a.credential, turnCredentials("shared", 600, now, "alice").credential);
+  // different label → different username, so use is attributable, not shared
+  assert.notEqual(a.username, turnCredentials("shared", 600, now, "bob").username);
+  // a colon in the label can't smuggle a second field / fake expiry
+  assert.equal(turnCredentials("shared", 600, now, "a:b").username, `${expiry}:ab`);
+});

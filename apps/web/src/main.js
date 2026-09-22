@@ -10,7 +10,7 @@ import {
 } from "../../../packages/net/src/serialize.js";
 import { toB64, fromB64, poissonDelay, keysFingerprint } from "../../../packages/crypto/src/util.js";
 import { deriveAuthSecret } from "../../../packages/crypto/src/authsecret.js";
-import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining, normalizeFile, truncateFilename, normalizeProfile } from "./text-utils.js";
+import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining, normalizeFile, truncateFilename, normalizeProfile, normalizeReply } from "./text-utils.js";
 import { parsePinsJson, pinsToObject, mergeSyncedPin } from "./pin-utils.js";
 import { ownDevicesOnly } from "./card-utils.js";
 import { reactionsAfterToggle, canUnsend, trimHistory, shouldStickToBottom } from "./message-utils.js";
@@ -717,7 +717,7 @@ async function onDeliver(envelope) {
   // Flag messages that only verified against a sender whose keys changed and
   // are not yet re-confirmed, so a server-swapped identity is visible inline.
   const unverified = sender !== me && isUnverified(sender);
-  pushMessage(convKey, { dir, sender, body: content.body, ts: content.ts || Date.now(), id: content.id, file: normalizeFile(content.file), replyTo: content.replyTo, unverified });
+  pushMessage(convKey, { dir, sender, body: content.body, ts: content.ts || Date.now(), id: content.id, file: normalizeFile(content.file), replyTo: normalizeReply(content.replyTo), unverified });
   if (sender !== me) {
     state.stats.recv++; updateStats(); emitPacket("recv");
     const muted = state.muted.has(convKey);
