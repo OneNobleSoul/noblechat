@@ -736,6 +736,13 @@ async function main() {
     if (!tryAcquireConn(connPerIp, ip, CFG.maxConnPerIp)) { ws.close(1013, "too many connections"); return; }
     sockets.add(ws);
     let unsub = null; let myMbkey = null;
+    // Heartbeat liveness: a mobile socket can go half-open (backgrounded tab,
+    // network switch, a long upload) without a close event, and the server would
+    // keep "delivering" into the void. The periodic ping below flips isAlive off;
+    // an unanswered ping terminates the socket so its subscription is dropped and
+    // future messages queue durably instead of vanishing.
+    ws.isAlive = true;
+    ws.on("pong", () => { ws.isAlive = true; });
     try { ws.send(JSON.stringify({ t: "status", ...statusObj() })); } catch { /* */ }
 
     ws.on("message", (raw) => {
@@ -769,7 +776,13 @@ async function main() {
           myMbkey = mbkey;
           if (!mbkeySockets.has(mbkey)) mbkeySockets.set(mbkey, new Set());
           mbkeySockets.get(mbkey).add(ws);
-          unsub = mix.subscribe(fromB64(m.provider), fromB64(m.mailbox), (env) => { if (ws.readyState === 1) ws.send(JSON.stringify({ t: "deliver", envelope: toB64(env) })); });
+          // Return true only when the envelope actually went out on an open
+          // socket; false tells the router to keep it in the durable queue so a
+          // device with a stale/half-open socket still gets it on reconnect.
+          unsub = mix.subscribe(fromB64(m.provider), fromB64(m.mailbox), (env) => {
+            if (ws.readyState !== 1) return false;
+            try { ws.send(JSON.stringify({ t: "deliver", envelope: toB64(env) })); return true; } catch { return false; }
+          });
         })().catch(() => {});
         return;
       }
@@ -787,10 +800,20 @@ async function main() {
   // Expired attachments get swept every 30s so auto-deleted images leave the
   // server promptly, not just at the hourly prune.
   const expireTimer = setInterval(() => { store.pruneExpiredFiles().catch(() => {}); }, 30 * 1000); expireTimer.unref();
+  // Ping every connected socket on an interval; terminate any that missed the
+  // previous round-trip. 30s is frequent enough to reclaim dead mobile sockets
+  // well before their messages pile up, without adding meaningful traffic.
+  const heartbeatTimer = setInterval(() => {
+    for (const ws of wss.clients) {
+      if (ws.isAlive === false) { try { ws.terminate(); } catch { /* */ } continue; }
+      ws.isAlive = false;
+      try { ws.ping(); } catch { /* */ }
+    }
+  }, 30 * 1000); heartbeatTimer.unref();
   let downFlag = false;
   function shutdown() {
     if (downFlag) return; downFlag = true;
-    clearInterval(pruneTimer); clearInterval(expireTimer);
+    clearInterval(pruneTimer); clearInterval(expireTimer); clearInterval(heartbeatTimer);
     try { if (nym) nym.close(); } catch { /* */ }
     try { wss.close(); } catch { /* */ }
     for (const ws of sockets) { try { ws.close(1001, "server shutting down"); } catch { /* */ } }
