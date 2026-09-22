@@ -122,8 +122,12 @@ input{font-family:var(--sans)}
 .set-label.danger-label{color:var(--danger);opacity:.85}
 .set-row{display:flex;justify-content:space-between;align-items:center;font-size:14px;margin-bottom:12px}
 .set-row b{font-family:var(--mono)}
-.set-btn{width:100%}
+.set-btn{width:100%;margin-top:6px}
 .set-hint{color:var(--dim);font-size:12px;line-height:1.5;margin:10px 0 0}
+.set-flabel{display:block;font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:1px;color:var(--dim);margin:10px 0 5px}
+.set-input{width:100%;background:#080b11;border:1px solid var(--line);border-radius:9px;color:var(--text);font-size:14px;padding:10px 12px;font-family:var(--sans);resize:vertical}
+.set-input:focus{outline:none;border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.set-color{width:52px;height:34px;padding:2px;background:#080b11;border:1px solid var(--line);border-radius:9px;cursor:pointer}
 
 /* calls */
 #call-voice{margin-left:auto}

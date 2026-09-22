@@ -154,6 +154,17 @@
   <div class="modal-card">
     <div class="modal-title">Settings</div>
     <div class="set-sec">
+      <div class="set-label">Profile</div>
+      <label for="set-name" class="set-flabel">Display name</label>
+      <input id="set-name" class="set-input" maxlength="32" placeholder="shown to your contacts" autocomplete="off">
+      <label for="set-bio" class="set-flabel">Bio</label>
+      <textarea id="set-bio" class="set-input" maxlength="140" rows="2" placeholder="a short line about you"></textarea>
+      <label for="set-color" class="set-flabel">Accent colour</label>
+      <input id="set-color" type="color" class="set-color" value="#5eead4">
+      <button id="set-save-profile" class="btn set-btn">Save profile</button>
+      <p class="set-hint">Your profile is end-to-end encrypted and only sent to contacts whose keys you have confirmed.</p>
+    </div>
+    <div class="set-sec">
       <div class="set-label">Account</div>
       <div class="set-row"><span>Signed in as</span><b id="set-handle">—</b></div>
       <button id="set-devices" class="btn ghost set-btn">Sign out other devices</button>

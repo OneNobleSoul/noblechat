@@ -141,3 +141,18 @@ test("normalizeFile only keeps expireAt when it is a finite number", () => {
   assert.equal(normalizeFile({ expireAt: 1735689600000 }).expireAt, 1735689600000);
   assert.equal(normalizeFile({ expireAt: "1735689600000" }).expireAt, 1735689600000);
 });
+
+test("normalizeProfile clamps text, validates colour and drops junk", async () => {
+  const { normalizeProfile } = await import("../apps/web/src/text-utils.js");
+  assert.equal(normalizeProfile(null), null);
+  assert.equal(normalizeProfile("nope"), null);
+  const p = normalizeProfile({ name: "  Alice   Wonder  ", bio: "x".repeat(500), color: "#AABBCC", updatedAt: 5 });
+  assert.equal(p.name, "Alice Wonder");
+  assert.equal(p.bio.length, 140);
+  assert.equal(p.color, "#aabbcc"); // lower-cased
+  assert.equal(p.updatedAt, 5);
+  const bad = normalizeProfile({ name: "y".repeat(100), color: "red" });
+  assert.equal(bad.name.length, 32);
+  assert.equal(bad.color, undefined); // invalid colour dropped
+  assert.equal("bio" in bad, false); // empty bio omitted
+});

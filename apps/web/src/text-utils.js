@@ -94,3 +94,19 @@ export function normalizeFile(f) {
   if (f.expireAt != null && Number.isFinite(Number(f.expireAt))) out.expireAt = Number(f.expireAt);
   return out;
 }
+
+// Clamp and validate a user profile before it is stored, broadcast or rendered.
+// Text is length-capped; color must be a 6-digit hex or it is dropped. Returns a
+// minimal object carrying only the fields that were actually set (plus a numeric
+// updatedAt), or null for junk input. Rendering still escapes name/bio as text.
+export function normalizeProfile(p) {
+  if (!p || typeof p !== "object") return null;
+  const name = String(p.name == null ? "" : p.name).replace(/\s+/g, " ").trim().slice(0, 32);
+  const bio = String(p.bio == null ? "" : p.bio).slice(0, 140).trim();
+  const color = /^#[0-9a-fA-F]{6}$/.test(String(p.color || "")) ? String(p.color).toLowerCase() : "";
+  const out = { updatedAt: Number.isFinite(Number(p.updatedAt)) ? Number(p.updatedAt) : 0 };
+  if (name) out.name = name;
+  if (bio) out.bio = bio;
+  if (color) out.color = color;
+  return out;
+}
