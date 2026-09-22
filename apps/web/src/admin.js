@@ -121,7 +121,10 @@ async function checkNodes() {
   }
 }
 
-async function refresh() { renderStatus(await api("/api/admin/status")); await loadUsers(); await loadLogs(); }
+async function loadChangelog() {
+  try { const r = await fetch("/api/changelog"); if (!r.ok) return; const j = await r.json(); const el = $("#changelog-edit"); if (el && document.activeElement !== el) el.value = j.text || ""; } catch { /* */ }
+}
+async function refresh() { renderStatus(await api("/api/admin/status")); await loadUsers(); await loadLogs(); await loadChangelog(); }
 
 async function loadUsers() {
   const d = await api("/api/admin/users");
@@ -176,6 +179,7 @@ $("#refresh").addEventListener("click", refresh);
 $("#logout").addEventListener("click", signOut);
 $("#ann-save").addEventListener("click", async () => { await api("/api/admin/announce", "POST", { text: $("#ann").value }); await refresh(); });
 $("#ann-clear").addEventListener("click", async () => { $("#ann").value = ""; await api("/api/admin/announce", "POST", { text: "" }); await refresh(); });
+$("#changelog-save").addEventListener("click", async () => { await api("/api/admin/changelog", "POST", { text: $("#changelog-edit").value }); await loadChangelog(); });
 $("#maint-on").addEventListener("click", async () => { await api("/api/admin/maintenance", "POST", { on: true, message: $("#maint-msg").value }); await refresh(); });
 $("#maint-off").addEventListener("click", async () => { await api("/api/admin/maintenance", "POST", { on: false, message: $("#maint-msg").value }); await refresh(); });
 $("#tr-internal").addEventListener("click", () => setTransport("internal"));
