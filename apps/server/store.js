@@ -332,10 +332,33 @@ export async function openStore(databaseUrl, { mailboxTtlMs = 7 * 24 * 3600 * 10
     async saveFileMeta(id, mime, size, expiresAt = null, owner = null) {
       await pool.query("INSERT INTO files(id,mime,size,created_at,expires_at,owner) VALUES($1,$2,$3,$4,$5,$6)", [id, String(mime).slice(0, 100), size, now(), expiresAt, owner]);
     },
-    // Total ciphertext bytes currently owned by an account (pentest M-4 quota).
+    // Total ciphertext bytes currently owned by an account (best-effort, used
+    // only as a cheap pre-check before streaming; the authoritative check is
+    // saveFileMetaChecked below).
     async ownedBytes(owner) {
       const r = await pool.query("SELECT COALESCE(SUM(size),0)::bigint AS total FROM files WHERE owner=$1", [owner]);
       return Number(r.rows[0] ? r.rows[0].total : 0);
+    },
+    // Atomic quota enforcement (pentest R-1). The old read-then-check-then-insert
+    // was a TOCTOU race: parallel uploads all read the same total and all passed.
+    // Serialise per owner with a transaction-scoped advisory lock, re-sum inside
+    // the lock, and only insert if it still fits. Returns false (over quota) or
+    // true (stored). Concurrent uploads from one account are now ordered, so the
+    // quota holds exactly.
+    async saveFileMetaChecked(id, mime, size, expiresAt, owner, quota) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", ["filequota:" + owner]);
+        const r = await client.query("SELECT COALESCE(SUM(size),0)::bigint AS total FROM files WHERE owner=$1", [owner]);
+        if (Number(r.rows[0].total) + Number(size) > Number(quota)) { await client.query("ROLLBACK"); return false; }
+        await client.query("INSERT INTO files(id,mime,size,created_at,expires_at,owner) VALUES($1,$2,$3,$4,$5,$6)", [id, String(mime).slice(0, 100), size, now(), expiresAt, owner]);
+        await client.query("COMMIT");
+        return true;
+      } catch (e) {
+        try { await client.query("ROLLBACK"); } catch { /* */ }
+        throw e;
+      } finally { client.release(); }
     },
     async getFile(id) {
       const r = await pool.query("SELECT mime, data, size, expires_at FROM files WHERE id=$1", [id]);

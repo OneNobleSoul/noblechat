@@ -604,11 +604,12 @@ async function main() {
           return json(res, 500, { error: "upload failed" });
         }
         if (!size) { await fs.promises.unlink(store.filePath(id)).catch(() => {}); return json(res, 400, { error: "empty" }); }
-        // Post-stream quota check: the size is only known after streaming, so a
-        // single upload that pushes the account over its quota is rolled back.
-        if (await store.ownedBytes(username) + size > CFG.maxAccountBytes) { await fs.promises.unlink(store.filePath(id)).catch(() => {}); return json(res, 413, { error: "storage quota reached" }); }
-        try { await store.saveFileMeta(id, mime, size, expiresAt, username); }
+        // Authoritative, atomic quota check (pentest R-1): serialised per owner,
+        // so parallel uploads can't all slip past the same stale total.
+        let stored;
+        try { stored = await store.saveFileMetaChecked(id, mime, size, expiresAt, username, CFG.maxAccountBytes); }
         catch { await fs.promises.unlink(store.filePath(id)).catch(() => {}); return json(res, 500, { error: "store failed" }); }
+        if (!stored) { await fs.promises.unlink(store.filePath(id)).catch(() => {}); return json(res, 413, { error: "storage quota reached" }); }
         return json(res, 200, { id });
       }
       // Attachment download. Signed-in callers only: the ciphertext is useless
