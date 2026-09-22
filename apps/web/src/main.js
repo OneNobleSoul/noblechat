@@ -604,6 +604,28 @@ function ensureConnected() {
 window.addEventListener("online", ensureConnected);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) ensureConnected(); });
 
+// ---------- casual save/screenshot deterrents ----------
+// Not real protection: decrypted media necessarily lives on the viewer's device,
+// so anyone determined can still keep a copy. These only raise the bar for the
+// non-technical: no right-click "Save image", no drag-to-desktop, no browser
+// download button on the video, and media blanks while devtools appear docked.
+const MEDIA_SEL = ".att-media, .att-media img, .att-media video, .lightbox, .lb-img, .att-audio";
+document.addEventListener("contextmenu", (e) => { if (e.target.closest(MEDIA_SEL)) e.preventDefault(); });
+document.addEventListener("dragstart", (e) => { if (e.target.closest(MEDIA_SEL)) e.preventDefault(); });
+// Devtools heuristic: a docked panel shrinks the viewport well below the window.
+// Purely a deterrent (an undocked window or a fresh open won't always trip it),
+// and it only hides media, never the app, so a false positive is harmless.
+(function watchDevtools() {
+  const THRESH = 170;
+  let last = null;
+  const check = () => {
+    const open = (window.outerWidth - window.innerWidth > THRESH) || (window.outerHeight - window.innerHeight > THRESH);
+    if (open !== last) { last = open; document.body.classList.toggle("guard-blank", open); }
+  };
+  setInterval(check, 700);
+  window.addEventListener("resize", check);
+})();
+
 // A conversation key is a plain handle for 1:1 chats or "g:<groupId>" for groups.
 function isGroupKey(k) { return typeof k === "string" && k.startsWith("g:"); }
 function groupOfKey(k) { return isGroupKey(k) ? state.groups.get(k.slice(2)) : null; }
@@ -1286,8 +1308,8 @@ async function openAttachment(m, node) {
       : new Blob([await decryptBytes(fromB64(f.key), buf)], { type: f.mime || "application/octet-stream" });
     const urlObj = URL.createObjectURL(blob);
     const kind = mimeKind(f.mime);
-    if (kind === "image") { node.innerHTML = `<img src="${urlObj}" alt="${esc(f.name)}">`; node.dataset.loaded = "1"; node.dataset.kind = "image"; node.dataset.url = urlObj; node.dataset.name = f.name || ""; openLightbox(node); }
-    else if (kind === "video") { node.innerHTML = `<video src="${urlObj}" controls playsinline preload="metadata"></video>`; node.dataset.loaded = "1"; node.dataset.kind = "video"; }
+    if (kind === "image") { node.innerHTML = `<img src="${urlObj}" alt="${esc(f.name)}" draggable="false">`; node.dataset.loaded = "1"; node.dataset.kind = "image"; node.dataset.url = urlObj; node.dataset.name = f.name || ""; openLightbox(node); }
+    else if (kind === "video") { node.innerHTML = `<video src="${urlObj}" controls controlslist="nodownload noremoteplayback" disablepictureinpicture draggable="false" playsinline preload="metadata"></video>`; node.dataset.loaded = "1"; node.dataset.kind = "video"; }
     else if (kind === "audio") { node.innerHTML = `<div class="att-audio"><div class="att-audio-name">🎵 ${esc(f.name)}</div><audio src="${urlObj}" controls preload="metadata"></audio></div>`; node.dataset.loaded = "1"; node.dataset.kind = "audio"; }
     else {
       const a = document.createElement("a"); a.href = urlObj; a.download = f.name || "file"; a.click();
@@ -1302,7 +1324,7 @@ function openLightbox(node) {
   let lb = document.getElementById("lightbox");
   if (!lb) {
     lb = document.createElement("div"); lb.id = "lightbox"; lb.className = "lightbox"; lb.hidden = true;
-    lb.innerHTML = `<button class="lb-close" aria-label="Close">✕</button><img class="lb-img" alt="">`;
+    lb.innerHTML = `<button class="lb-close" aria-label="Close">✕</button><img class="lb-img" alt="" draggable="false">`;
     document.body.appendChild(lb);
     lb.addEventListener("click", (e) => { if (e.target === lb || e.target.closest(".lb-close")) closeLightbox(); });
   }
