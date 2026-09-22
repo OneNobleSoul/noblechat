@@ -322,6 +322,12 @@ async function main() {
   // Handle lookups, budgeted per account rather than per address: adding
   // contacts is bursty but nobody legitimately walks thousands of handles.
   const lookupLimit = rateLimiter({ capacity: 60, refillPerSec: 0.5 });
+  // Presence is charged per handle (pentest M-3): a request costs as many tokens
+  // as handles it asks about, so it can't be used to sweep the namespace the way
+  // a flat per-request limit allowed. Sized for honest use: a client polls its
+  // whole contact list every 15s, so the refill comfortably covers a few hundred
+  // contacts while an enumerator is throttled to ~10 handles/s sustained.
+  const presenceLimit = rateLimiter({ capacity: 300, refillPerSec: 10 });
 
   // Admin access is granted two ways: the shared ADMIN_TOKEN (bootstrap / owner)
   // or a session token belonging to an account flagged is_admin. The latter lets
@@ -390,7 +396,7 @@ async function main() {
         res.writeHead(202).end(); return;
       }
       if (url.pathname === "/api/net") { if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" }); return json(res, 200, { view: dir.publicView(), meanDelayMs: CFG.meanDelayMs }); }
-      if (url.pathname === "/api/status") { if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" }); return json(res, 200, statusObj()); }
+      if (url.pathname === "/api/status" && req.method === "GET") { if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" }); return json(res, 200, statusObj()); }
       // Release notes, authored by admins (see /api/admin/changelog). Public: it
       // is not sensitive, just what changed between builds.
       if (url.pathname === "/api/changelog" && req.method === "GET") { if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" }); return json(res, 200, { text: await store.getSetting("changelog", "") }); }
@@ -523,19 +529,24 @@ async function main() {
       // live mailbox subscription. Signed-in callers only, so it is not an open
       // presence oracle. Kept coarse (per handle, no timestamps).
       if (url.pathname === "/api/presence") {
-        if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" });
         const username = await sessionUser(sessionToken(req));
         if (!username) return json(res, 401, { error: "not signed in" });
         const handles = String(url.searchParams.get("handles") || "").toLowerCase().split(",").filter((h) => HANDLE_RE.test(h)).slice(0, 100);
+        // Charge one token per handle so this can't be an enumeration shortcut
+        // around /api/bundle's per-account budget (pentest M-3).
+        if (!presenceLimit(username, Math.max(1, handles.length))) return json(res, 429, { error: "too many lookups" });
         // Return the online handles as a list rather than writing them as keys
         // of an object: a caller-supplied handle used as a dynamic property name
         // is a property-injection sink (HANDLE_RE even allows "__proto__"). A
         // list has no such sink and the client just checks membership.
-        const online = [];
-        for (const h of handles) {
-          const mbks = await store.deviceMbkeys(h);
-          if (mbks.some((k) => { const s = mbkeySockets.get(k); return !!(s && s.size > 0); })) online.push(h);
+        const want = new Set(handles);
+        const byUser = new Map(); // handle -> has a live socket
+        for (const row of await store.deviceRowsFor([...want])) {
+          if (byUser.get(row.username)) continue;
+          const s = mbkeySockets.get(row.mbkey);
+          if (s && s.size > 0) byUser.set(row.username, true);
         }
+        const online = handles.filter((h) => byUser.get(h));
         return json(res, 200, { online });
       }
       // Short-lived TURN relay credentials for calls stuck behind strict NAT

@@ -225,6 +225,14 @@ export async function openStore(databaseUrl, { mailboxTtlMs = 7 * 24 * 3600 * 10
       const r = await pool.query("SELECT mbkey FROM devices WHERE username=$1 AND mbkey IS NOT NULL", [username]);
       return r.rows.map((x) => x.mbkey);
     },
+    // One query for a batch of handles instead of one per handle (pentest M-3
+    // amplification). Returns {username, mbkey} rows; the caller maps each mbkey
+    // to a live socket to decide who is online.
+    async deviceRowsFor(usernames) {
+      if (!usernames.length) return [];
+      const r = await pool.query("SELECT username, mbkey FROM devices WHERE username = ANY($1) AND mbkey IS NOT NULL", [usernames]);
+      return r.rows;
+    },
 
     // ---- sessions ----
     async createSession(token, username, ttlMs) {

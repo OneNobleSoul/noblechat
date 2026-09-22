@@ -59,7 +59,12 @@ services:
       # send the password once so it can be re-stored as an auth secret; that
       # is the only remaining way a password reaches this server, so it is not
       # left open forever. Afterwards those accounts need a password reset.
-      LEGACY_AUTH_UNTIL: ${LEGACY_AUTH_UNTIL:-}
+      # Legacy one-time-password upgrade path is closed by default (pentest L-5):
+      # every account is already auth_ver=2, so no account needs it, and leaving
+      # it open forever let a compromised server harvest a plaintext password
+      # from any future legacy sign-in. Set a real future date only if a genuine
+      # pre-v2 account ever needs to migrate again.
+      LEGACY_AUTH_UNTIL: ${LEGACY_AUTH_UNTIL:-2026-01-01T00:00:00Z}
       # Overrides the connect-src origins allowed when the nym transport is on.
       # Defaults to the nym validator plus wss:; set it if you point the client
       # at a different validator or want a pinned gateway set.
