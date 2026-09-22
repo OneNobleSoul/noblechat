@@ -391,6 +391,9 @@ async function main() {
       }
       if (url.pathname === "/api/net") { if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" }); return json(res, 200, { view: dir.publicView(), meanDelayMs: CFG.meanDelayMs }); }
       if (url.pathname === "/api/status") { if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" }); return json(res, 200, statusObj()); }
+      // Release notes, authored by admins (see /api/admin/changelog). Public: it
+      // is not sensitive, just what changed between builds.
+      if (url.pathname === "/api/changelog" && req.method === "GET") { if (!httpLimit(ip)) return json(res, 429, { error: "rate limited" }); return json(res, 200, { text: await store.getSetting("changelog", "") }); }
 
       // ---- accounts ----
       if (url.pathname === "/api/account/register" && req.method === "POST") {
@@ -710,6 +713,7 @@ async function main() {
           catch (e) { return badBody(res, e); }
           const handle = asHandle(body.handle) || asHandle(body.username) || "";
           if (url.pathname === "/api/admin/announce") { live.announcement = String(body.text || "").slice(0, 500); await store.setSetting("announcement", live.announcement); elog.add("info", live.announcement ? "announcement published" : "announcement cleared"); broadcastStatus(); return json(res, 200, { ok: true }); }
+          if (url.pathname === "/api/admin/changelog") { await store.setSetting("changelog", String(body.text || "").slice(0, 20000)); elog.add("info", "changelog updated"); return json(res, 200, { ok: true }); }
           if (url.pathname === "/api/admin/maintenance") { live.maintenance = !!body.on; live.maintenanceMsg = String(body.message || "").slice(0, 500); await store.setSetting("maintenance", live.maintenance ? "on" : "off"); await store.setSetting("maintenance_msg", live.maintenanceMsg); elog.add("warn", "maintenance " + (live.maintenance ? "enabled" : "disabled")); broadcastStatus(); return json(res, 200, { ok: true, maintenance: live.maintenance }); }
           if (url.pathname === "/api/admin/transport") {
             const mode = String(body.mode || "");

@@ -1355,6 +1355,8 @@ document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   const lb = document.getElementById("lightbox");
   if (lb && !lb.hidden) { closeLightbox(); return; }
+  const clm = document.getElementById("changelog-modal");
+  if (clm && !clm.hidden) { closeChangelog(); return; }
   const pvm = document.getElementById("profile-modal");
   if (pvm && !pvm.hidden) { closeProfileView(); return; }
   const stm = document.getElementById("settings-modal");
@@ -1580,6 +1582,19 @@ function openProfileView(handle) {
   m.hidden = false;
 }
 function closeProfileView() { const m = $("#profile-modal"); if (m) m.hidden = true; }
+
+// ---------- changelog ("What's new") ----------
+async function openChangelog() {
+  const m = $("#changelog-modal"); const body = $("#changelog-body"); if (!m || !body) return;
+  body.textContent = "Loading…"; m.hidden = false;
+  try {
+    const r = await fetch("/api/changelog"); const j = r.ok ? await r.json() : { text: "" };
+    const text = String(j.text || "").trim();
+    // Escaped text only; blank lines separate paragraphs, single newlines break.
+    body.innerHTML = text ? text.split(/\n{2,}/).map((p) => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("") : `<p class="cl-empty">Nothing here yet.</p>`;
+  } catch { body.textContent = "Could not load."; }
+}
+function closeChangelog() { const m = $("#changelog-modal"); if (m) m.hidden = true; }
 
 // ---------- mix viz ----------
 function buildNetViz() {
@@ -1857,6 +1872,8 @@ function wireUI() {
   const setar = $("#set-avatar-remove"); if (setar) setar.addEventListener("click", () => { state._pendingAvatar = null; state._avatarRemoved = true; renderOwnProfilePreview(); });
   const setbr = $("#set-banner-remove"); if (setbr) setbr.addEventListener("click", () => { state._pendingBanner = null; state._bannerRemoved = true; renderOwnProfilePreview(); });
   const pvc = $("#pv-close"); if (pvc) pvc.addEventListener("click", closeProfileView);
+  const wn = $("#whatsnew"); if (wn) wn.addEventListener("click", (e) => { e.preventDefault(); openChangelog(); });
+  const clc = $("#changelog-close"); if (clc) clc.addEventListener("click", closeChangelog);
   const cwith = $("#chat-with"); if (cwith) cwith.addEventListener("click", () => { if (state.active && !groupOfKey(state.active)) openProfileView(state.active); });
   const snd = $("#sound-toggle"); if (snd) snd.addEventListener("click", toggleSound); renderSoundToggle();
   const back = $("#chat-back"); if (back) back.addEventListener("click", () => setMobileView("list"));
