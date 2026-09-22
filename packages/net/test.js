@@ -135,3 +135,27 @@ test("replay guard caps memory by size and rejects duplicates across the cap", (
   assert.equal(g.seen("a", 0), true); // "a" still in prev after rotation
   assert.equal(g.seen("d", 0), false);
 });
+
+test("a delivery to a stale subscriber (callback returns false) is queued, not lost", async () => {
+  const dir = buildTestnet();
+  const mix = new Mixnet(dir, { meanDelayMs: 1 });
+  const alice = generateIdentity("alice", dir.providers[0].id);
+  const bob = generateIdentity("bob", dir.providers[0].id);
+
+  // Bob is "subscribed" but his socket is stale: the callback reports failure by
+  // returning false, exactly as the gateway does when ws.readyState !== 1.
+  let deadHits = 0;
+  mix.subscribe(bob.providerId, bob.mailbox, () => { deadHits++; return false; });
+
+  const { firstNodeId, packet } = buildOutgoing(dir, bob.card, { t: "msg", body: "keep me", ts: 1 }, alice.sign);
+  mix.inject(firstNodeId, packet);
+  // give the async delivery a tick to run
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(deadHits, 1); // the stale callback was tried once
+
+  // Bob reconnects with a healthy socket: the queued envelope must arrive.
+  const got = await waitFor((done) =>
+    mix.subscribe(bob.providerId, bob.mailbox, (env) => { done(openIncoming(bob, env)); return true; }),
+  );
+  assert.equal(got.content.body, "keep me");
+});

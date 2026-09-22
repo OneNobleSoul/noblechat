@@ -564,6 +564,9 @@ function ensureContact(handle) { if (!state.contacts.has(handle)) fetchBundle(ha
 
 // ---------- transport ----------
 function connectWS() {
+  // Don't stack sockets: a pending reconnect timer and a foreground/online
+  // wake-up can both fire. If one is already connecting or open, leave it.
+  if (state.ws && (state.ws.readyState === 0 || state.ws.readyState === 1)) return;
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/gateway`);
   state.ws = ws;
@@ -587,6 +590,19 @@ function connectWS() {
     setTimeout(connectWS, 1500);
   });
 }
+// Reconnect the gateway socket when it is not open. Mobile browsers freeze or
+// tear down sockets in the background (and during a long upload), often without
+// a timely close event, which is why messages could stop flowing until a manual
+// reload. Trigger this when the network returns or the tab comes back to the
+// foreground so both sending and receiving recover on their own.
+function ensureConnected() {
+  if (!state.token || !state.identity) return; // not signed in yet
+  const rs = state.ws ? state.ws.readyState : 3;
+  if (rs === 0 || rs === 1) return; // connecting or open
+  connectWS();
+}
+window.addEventListener("online", ensureConnected);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) ensureConnected(); });
 
 // A conversation key is a plain handle for 1:1 chats or "g:<groupId>" for groups.
 function isGroupKey(k) { return typeof k === "string" && k.startsWith("g:"); }
@@ -708,6 +724,10 @@ function applyUnsend(key, c) {
 // using the gateway websocket subscription in both modes; only the uplink is
 // anonymised over Nym at this stage.
 function internalSubmit(card, content) {
+  // A stale socket (post-upload, returned from background) may still exist but
+  // not be open. Kick a reconnect and report failure so the caller surfaces
+  // "not reachable yet" rather than throwing into a dead socket.
+  if (!state.ws || state.ws.readyState !== 1) { ensureConnected(); throw new Error("socket not open"); }
   const { firstNodeId, packet } = buildOutgoing(state.net, card, content, state.identity.sign);
   state.ws.send(JSON.stringify({ t: "submit", node: toB64(firstNodeId), packet: serializePacket(packet) }));
 }

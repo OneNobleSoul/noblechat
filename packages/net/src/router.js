@@ -56,11 +56,17 @@ export class Mixnet {
     const k = this._key(providerId, inner.mailbox);
     this.stats.delivered++;
     const subs = this.subs.get(k);
+    // A subscriber whose socket is open takes the delivery live. But a callback
+    // may report failure (socket not open, send threw) by returning false: a
+    // mobile client's socket can go stale without the close event firing yet, so
+    // the server still lists it as subscribed. If NO subscriber actually took
+    // the envelope, fall back to the durable queue instead of dropping it, so it
+    // is delivered when that device reconnects and re-subscribes.
+    let delivered = false;
     if (subs && subs.size) {
-      for (const cb of subs) cb(inner.envelope);
-    } else {
-      Promise.resolve(this.mailboxStore.push(k, inner.envelope)).catch(() => {});
+      for (const cb of subs) { try { if (cb(inner.envelope) !== false) delivered = true; } catch { /* dead callback */ } }
     }
+    if (!delivered) Promise.resolve(this.mailboxStore.push(k, inner.envelope)).catch(() => {});
   }
 
   // Inject a packet at a given node id (the client sends to the first hop).
