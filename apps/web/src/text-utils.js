@@ -108,5 +108,8 @@ export function normalizeProfile(p) {
   if (name) out.name = name;
   if (bio) out.bio = bio;
   if (color) out.color = color;
+  // avatar/banner are encrypted-attachment descriptors, validated like any file
+  const av = normalizeFile(p.avatar); if (av && av.id && av.key) out.avatar = av;
+  const bn = normalizeFile(p.banner); if (bn && bn.id && bn.key) out.banner = bn;
   return out;
 }

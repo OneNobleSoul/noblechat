@@ -161,6 +161,18 @@
       <textarea id="set-bio" class="set-input" maxlength="140" rows="2" placeholder="a short line about you"></textarea>
       <label for="set-color" class="set-flabel">Accent colour</label>
       <input id="set-color" type="color" class="set-color" value="#5eead4">
+      <label class="set-flabel">Avatar</label>
+      <div class="set-imgrow">
+        <div id="set-avatar-prev" class="set-avatar-prev"></div>
+        <label class="btn ghost set-file">Choose<input id="set-avatar-file" type="file" accept="image/*" hidden></label>
+        <button id="set-avatar-remove" class="btn ghost set-file" type="button">Remove</button>
+      </div>
+      <label class="set-flabel">Banner</label>
+      <div id="set-banner-prev" class="set-banner-prev"></div>
+      <div class="set-imgrow">
+        <label class="btn ghost set-file">Choose<input id="set-banner-file" type="file" accept="image/*" hidden></label>
+        <button id="set-banner-remove" class="btn ghost set-file" type="button">Remove</button>
+      </div>
       <button id="set-save-profile" class="btn set-btn">Save profile</button>
       <p class="set-hint">Your profile is end-to-end encrypted and only sent to contacts whose keys you have confirmed.</p>
     </div>
@@ -182,6 +194,17 @@
     <div class="modal-actions">
       <button id="set-close" class="btn ghost">Close</button>
     </div>
+  </div>
+</div>
+
+<div id="profile-modal" class="modal" hidden>
+  <div class="modal-card pv-card">
+    <button id="pv-close" class="lb-close" aria-label="Close">✕</button>
+    <div id="pv-banner" class="pv-banner"></div>
+    <div id="pv-avatar" class="pv-avatar"></div>
+    <div id="pv-name" class="pv-name"></div>
+    <div id="pv-handle" class="pv-handle"></div>
+    <p id="pv-bio" class="pv-bio" hidden></p>
   </div>
 </div>
 
