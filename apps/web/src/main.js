@@ -10,7 +10,7 @@ import {
 } from "../../../packages/net/src/serialize.js";
 import { toB64, fromB64, poissonDelay, keysFingerprint } from "../../../packages/crypto/src/util.js";
 import { deriveAuthSecret } from "../../../packages/crypto/src/authsecret.js";
-import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining, normalizeFile, truncateFilename } from "./text-utils.js";
+import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining, normalizeFile, truncateFilename, normalizeProfile } from "./text-utils.js";
 import { parsePinsJson, pinsToObject, mergeSyncedPin } from "./pin-utils.js";
 import { ownDevicesOnly } from "./card-utils.js";
 import { reactionsAfterToggle, canUnsend, trimHistory, shouldStickToBottom } from "./message-utils.js";
@@ -23,13 +23,14 @@ import { isTurnServer } from "./ice-utils.js";
 const BLOB_KEY_NAME = "blob";
 
 const $ = (s) => document.querySelector(s);
-const K = { token: "noblechat:token", user: "noblechat:user", dev: "noblechat:deviceId", id: "noblechat:id", bkey: "noblechat:bkey", contacts: "noblechat:contacts", prefs: "noblechat:prefs", history: "noblechat:history", pins: "noblechat:pins" };
+const K = { token: "noblechat:token", user: "noblechat:user", dev: "noblechat:deviceId", id: "noblechat:id", bkey: "noblechat:bkey", contacts: "noblechat:contacts", prefs: "noblechat:prefs", history: "noblechat:history", pins: "noblechat:pins", profiles: "noblechat:profiles" };
 const HISTORY_PER_CHAT = 300; // cap stored messages per conversation
 
 const state = {
   ws: null, net: null, meanDelayMs: 60,
   token: null, user: null, deviceId: null, identity: null, blobKey: null, blobKeyLegacy: null,
   myBundle: [], contacts: new Map(), convos: new Map(), active: null,
+  profile: {}, profiles: new Map(), // own profile + received contact profiles (handle -> normalized profile)
   coverOn: true, coverTimer: null, netCols: [], stats: { sent: 0, cover: 0, recv: 0 },
   seen: new Set(), version: null, maintenance: false, statusTimer: null, authMode: "login",
   transport: "internal", nymAddress: null,
@@ -304,8 +305,12 @@ async function afterAuth() {
   await loadMyBundle();
   loadContactsLocal();
   await loadConvos();
+  await loadProfiles();
   startApp();
   loadContactsFromBlob(); // async refresh from encrypted server backup
+  // Push our profile out once on start so contacts pick up the latest, and our
+  // other devices converge. Delayed so the socket/subscription is up first.
+  setTimeout(() => { if (hasProfileContent(state.profile)) broadcastProfile(); }, 4000);
 }
 
 // ---------- key generation ring ----------
@@ -421,7 +426,7 @@ async function loadConvos() {
 async function uploadContactsBlob() {
   if (!state.blobKey || !state.token) return;
   try {
-    const payload = { v: 3, contacts: [...state.contacts.keys()], muted: [...state.muted], blocked: [...state.blocked], groups: [...state.groups.values()], pins: pinsToObject(state.pins) };
+    const payload = { v: 3, contacts: [...state.contacts.keys()], muted: [...state.muted], blocked: [...state.blocked], groups: [...state.groups.values()], pins: pinsToObject(state.pins), profile: state.profile };
     const blob = await encryptBlob(state.blobKey, payload);
     await fetch("/api/account/blob", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: state.token, blob }) });
   } catch { /* */ }
@@ -448,6 +453,7 @@ async function loadContactsFromBlob() {
         const merged = mergeSyncedPin(state.pins.get(h), p);
         if (merged) state.pins.set(h, merged);
       }
+      const ownP = normalizeProfile(data.profile); if (ownP) state.profile = ownP;
       savePins();
       savePrefs();
     }
@@ -688,6 +694,13 @@ async function onDeliver(envelope) {
   // a 1:1 message from someone else must actually be addressed to us
   if (!isG && sender !== me && content.to !== me) return;
   if (content.t === "call") { if (sender !== me) handleCallSignal(content); return; }
+  // Profile update: from a contact, cache it; our own (echoed to our other
+  // devices) keeps this device's profile in sync after an edit elsewhere.
+  if (content.t === "profile") {
+    if (sender === me) { const p = normalizeProfile(content.profile); if (p) state.profile = p; }
+    else applyProfile(sender, content.profile);
+    return;
+  }
   if (isG) ensureGroup(content.g);
   const convKey = isG ? "g:" + content.g.id : (sender === me ? (content.to || "unknown") : sender);
 
@@ -1068,7 +1081,7 @@ function pushMessage(handle, msg) {
 function setActive(handle) {
   state.active = handle; $("#chat-empty").hidden = true; $("#chat-view").hidden = false;
   const g = groupOfKey(handle);
-  $("#chat-with").textContent = g ? g.name : handle;
+  $("#chat-with").textContent = g ? g.name : displayName(handle);
   clearUnread(handle);
   renderContacts(); renderMessages(); renderKeyBanner(); updateChatHeadPresence(); setMobileView("chat");
   const cv = $("#call-voice"), cvd = $("#call-video"); if (cv) cv.hidden = !!g; if (cvd) cvd.hidden = !!g;
@@ -1106,9 +1119,11 @@ function renderContacts() {
     const muteIcon = state.muted.has(h) ? `<span class="mini-icon" title="muted">🔕</span>` : "";
     const on = state.presence.get(h);
     const dot = `<span class="dot ${on ? "on" : "off"}" title="${on ? "online" : "offline"}"></span>`;
+    const dn = displayName(h); const col = profileColor(h); const named = dn !== h;
+    const sub = named ? `@${esc(h)} · ${on ? "online" : "offline"}` : (on ? "online" : "offline");
     html += `<div class="contact ${h === state.active ? "active" : ""} ${unread ? "has-unread" : ""}" data-h="${esc(h)}">
-      <div class="avatar">${esc(h[0] || "?").toUpperCase()}${dot}</div>
-      <div class="c-main"><div class="h">${esc(h)} ${muteIcon}${isUnverified(h) ? `<span class="mini-icon warn" title="security keys changed - verify">⚠</span>` : ""}</div><div class="s">${on ? "online" : "offline"}</div></div>
+      <div class="avatar"${col ? ` style="background:${col}"` : ""}>${esc(dn[0] || "?").toUpperCase()}${dot}</div>
+      <div class="c-main"><div class="h">${esc(dn)} ${muteIcon}${isUnverified(h) ? `<span class="mini-icon warn" title="security keys changed - verify">⚠</span>` : ""}</div><div class="s">${sub}</div></div>
       ${badge}
       <button class="row-menu" data-menu="${esc(h)}" title="Options" aria-label="Options">⋮</button>
     </div>`;
@@ -1388,6 +1403,9 @@ async function forgetOtherDevices() {
 function openSettings() {
   const m = $("#settings-modal"); if (!m) return;
   const h = $("#set-handle"); if (h) h.textContent = state.user || "—";
+  const n = $("#set-name"); if (n) n.value = state.profile.name || "";
+  const b = $("#set-bio"); if (b) b.value = state.profile.bio || "";
+  const c = $("#set-color"); if (c) c.value = state.profile.color || "#5eead4";
   m.hidden = false;
 }
 function closeSettings() { const m = $("#settings-modal"); if (m) m.hidden = true; }
@@ -1415,6 +1433,62 @@ async function deleteAccountFlow() {
     clearKeys();
     location.reload();
   } catch { toast("could not delete account"); }
+}
+
+// ---------- profiles ----------
+// Contact profiles are cached locally (encrypted with the blob key) so custom
+// names/colours survive a reload without waiting for the contact to re-broadcast.
+function saveProfiles() {
+  if (!state.blobKey) return;
+  const obj = {}; for (const [h, p] of state.profiles) obj[h] = p;
+  encryptBlob(state.blobKey, obj).then((b) => ls.set(K.profiles, b)).catch(() => {});
+}
+async function loadProfiles() {
+  if (!state.blobKey) return;
+  try {
+    const raw = ls.get(K.profiles); if (!raw) return;
+    const { data } = await decryptBlobMigrating(raw);
+    for (const [h, p] of Object.entries(data || {})) { const np = normalizeProfile(p); if (np) state.profiles.set(h, np); }
+  } catch { /* */ }
+}
+// Name/colour to show for a handle: their profile only when their keys are
+// confirmed (not in a changed-key state); otherwise fall back to the handle.
+function displayName(handle) {
+  const p = !isUnverified(handle) && state.profiles.get(handle);
+  return (p && p.name) ? p.name : handle;
+}
+function profileColor(handle) {
+  const p = !isUnverified(handle) && state.profiles.get(handle);
+  return (p && p.color) ? p.color : "";
+}
+// Store a profile received from a contact (the sender was already authenticated
+// upstream in onDeliver before this runs).
+function applyProfile(handle, profile) {
+  const p = normalizeProfile(profile); if (!p) return;
+  state.profiles.set(handle, p); saveProfiles(); renderContacts();
+  if (state.active === handle) { const cw = $("#chat-with"); if (cw) cw.textContent = displayName(handle); }
+}
+function hasProfileContent(p) { return !!(p && (p.name || p.bio || p.color)); }
+// Broadcast our own profile to every confirmed contact and our own devices.
+async function broadcastProfile() {
+  if (!state.identity) return;
+  await loadMyBundle();
+  const id = randHex(8); const mine = toB64(state.identity.card.mailbox);
+  for (const [h, cards] of state.contacts) {
+    if (isUnverified(h)) continue; // never hand our profile to a swapped key
+    for (const card of cards) sendToCard(card, { v: 1, from: state.user, id, ts: Date.now(), to: h, t: "profile", profile: state.profile });
+  }
+  for (const card of state.myBundle) if (toB64(card.mailbox) !== mine) sendToCard(card, { v: 1, from: state.user, id, ts: Date.now(), to: state.user, t: "profile", profile: state.profile });
+  markSeen(id);
+}
+function saveProfile() {
+  const name = $("#set-name") ? $("#set-name").value : "";
+  const bio = $("#set-bio") ? $("#set-bio").value : "";
+  const color = $("#set-color") ? $("#set-color").value : "";
+  state.profile = normalizeProfile({ name, bio, color, updatedAt: Date.now() }) || { updatedAt: Date.now() };
+  uploadContactsBlob(); broadcastProfile(); renderContacts();
+  if (state.active) { const cw = $("#chat-with"); if (cw && !groupOfKey(state.active)) cw.textContent = displayName(state.active); }
+  toast("profile saved");
 }
 
 // ---------- mix viz ----------
@@ -1665,8 +1739,13 @@ async function submitGroup() {
 
 // ---------- wire ui ----------
 function wireUI() {
-  $("#add-go").addEventListener("click", () => { fetchBundle($("#add-handle").value, { silent: false }); $("#add-handle").value = ""; });
-  $("#add-handle").addEventListener("keydown", (e) => { if (e.key === "Enter") { fetchBundle($("#add-handle").value, { silent: false }); $("#add-handle").value = ""; } });
+  const addContact = async () => {
+    const v = $("#add-handle").value; $("#add-handle").value = "";
+    const ok = await fetchBundle(v, { silent: false });
+    if (ok && hasProfileContent(state.profile)) broadcastProfile(); // let the new contact receive our profile
+  };
+  $("#add-go").addEventListener("click", addContact);
+  $("#add-handle").addEventListener("keydown", (e) => { if (e.key === "Enter") addContact(); });
   const ng = $("#new-group"); if (ng) ng.addEventListener("click", openGroupModal);
   const cv = $("#call-voice"); if (cv) cv.addEventListener("click", () => state.active && startCall(state.active, false));
   const cvd = $("#call-video"); if (cvd) cvd.addEventListener("click", () => state.active && startCall(state.active, true));
@@ -1682,6 +1761,7 @@ function wireUI() {
   const setdev = $("#set-devices"); if (setdev) setdev.addEventListener("click", () => { closeSettings(); forgetOtherDevices(); });
   const setw = $("#set-wipe"); if (setw) setw.addEventListener("click", panicWipe);
   const setdel = $("#set-delete"); if (setdel) setdel.addEventListener("click", deleteAccountFlow);
+  const setsp = $("#set-save-profile"); if (setsp) setsp.addEventListener("click", saveProfile);
   const snd = $("#sound-toggle"); if (snd) snd.addEventListener("click", toggleSound); renderSoundToggle();
   const back = $("#chat-back"); if (back) back.addEventListener("click", () => setMobileView("list"));
   const cmenu = $("#chat-menu"); if (cmenu) cmenu.addEventListener("click", (e) => { e.stopPropagation(); openChatMenu(); });
