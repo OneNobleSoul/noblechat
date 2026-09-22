@@ -481,6 +481,21 @@ async function main() {
           return json(res, 200, { ok: true, removed: mbk.length });
         } catch (e) { return badBody(res, e); }
       }
+      // Self-service account deletion. Authenticated caller only; wipes the whole
+      // account (all devices, blob, queued ciphertext) and disconnects every one
+      // of its live sockets. Same store call the admin delete uses.
+      if (url.pathname === "/api/account/delete" && req.method === "POST") {
+        if (!httpLimit(ip, 2)) return json(res, 429, { error: "rate limited" });
+        try {
+          const b = JSON.parse(await readBody(req, CFG.maxBodyBytes));
+          const username = await sessionUser(asToken(b.token));
+          if (!username) return json(res, 401, { error: "not signed in" });
+          const mbk = await store.deleteAccount(username);
+          for (const k of mbk) { const set = mbkeySockets.get(k); if (set) for (const ws of set) { try { ws.close(4004, "account deleted"); } catch { /* */ } } }
+          elog.add("warn", "account self-deleted", username);
+          return json(res, 200, { ok: true });
+        } catch (e) { return badBody(res, e); }
+      }
       // Public key material for a handle. Signed-in callers only: unauthenticated
       // this was a user directory. It answers 200-with-bundle for a handle that
       // exists and 404 for one that doesn't, and the bundle carries the mailbox
