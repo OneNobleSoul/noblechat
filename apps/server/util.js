@@ -297,3 +297,23 @@ export function staticCacheControl(file, url, noCache) {
 export function clampExpireSec(raw, maxSec) {
   return Math.min(Math.max(0, Math.floor(Number(raw) || 0)), maxSec);
 }
+
+// Token-bucket limiter shared by every route that needs one (auth attempts,
+// http requests per IP, submit/lookup/presence per account). One bucket per
+// key, refilled continuously at refillPerSec and capped at capacity, so a
+// burst is allowed but sustained abuse is not. The idle sweep drops buckets
+// nobody has touched in 10 minutes so long-lived processes do not accumulate
+// one entry per handle/IP forever.
+// `now` is a parameter on the returned function (not just read from Date.now()
+// inside it) so tests can drive the clock deterministically, same trick as
+// makeLockout above.
+export function rateLimiter({ capacity, refillPerSec }) {
+  const buckets = new Map();
+  setInterval(() => { const now = Date.now(); for (const [k, b] of buckets) if (now - b.last > 600000) buckets.delete(k); }, 300000).unref();
+  return (key, cost = 1, now = Date.now()) => {
+    let b = buckets.get(key);
+    if (!b) { b = { tokens: capacity, last: now }; buckets.set(key, b); }
+    b.tokens = Math.min(capacity, b.tokens + ((now - b.last) / 1000) * refillPerSec); b.last = now;
+    if (b.tokens < cost) return false; b.tokens -= cost; return true;
+  };
+}
