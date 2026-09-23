@@ -21,7 +21,7 @@ import { createLog } from "./log.js";
 import { isTransport } from "./transport.js";
 import { connectNym } from "./nym.js";
 import { turnIceServers } from "./turn.js";
-import { HANDLE_RE, DEVICE_ID_RE, AUTH_SECRET_RE, asHandle, asToken, isB64, validCard, readBody, streamToFile, json, timingEqual, originAllowed, hashPassword, verifyPassword, clampExpireSec, tryAcquireConn, releaseConn, staticRelPath, staticCacheControl, clientIp, makeLockout } from "./util.js";
+import { HANDLE_RE, DEVICE_ID_RE, AUTH_SECRET_RE, asHandle, asToken, isB64, validCard, readBody, streamToFile, json, timingEqual, originAllowed, hashPassword, verifyPassword, clampExpireSec, tryAcquireConn, releaseConn, staticRelPath, staticCacheControl, clientIp, makeLockout, rateLimiter } from "./util.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.resolve(__dirname, "../web/public");
@@ -159,16 +159,6 @@ function setSecurityHeaders(res) {
   res.setHeader("Referrer-Policy", "no-referrer");
   res.setHeader("Permissions-Policy", "camera=(self), microphone=(self), geolocation=(), payment=()");
   res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
-}
-function rateLimiter({ capacity, refillPerSec }) {
-  const buckets = new Map();
-  setInterval(() => { const now = Date.now(); for (const [k, b] of buckets) if (now - b.last > 600000) buckets.delete(k); }, 300000).unref();
-  return (key, cost = 1) => {
-    const now = Date.now(); let b = buckets.get(key);
-    if (!b) { b = { tokens: capacity, last: now }; buckets.set(key, b); }
-    b.tokens = Math.min(capacity, b.tokens + ((now - b.last) / 1000) * refillPerSec); b.last = now;
-    if (b.tokens < cost) return false; b.tokens -= cost; return true;
-  };
 }
 // Upper bound on a mixnet inner payload accepted for delivery (pentest N-01d).
 // A legitimate sealed envelope is a few KB; this blocks a 256 KB junk injection

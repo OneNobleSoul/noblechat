@@ -6,7 +6,7 @@ import {
   readBody, timingEqual, originAllowed,
   hashPassword, verifyPassword, clampExpireSec,
   tryAcquireConn, releaseConn, staticRelPath, staticCacheControl,
-  clientIp, makeLockout, asHandle, asToken,
+  clientIp, makeLockout, asHandle, asToken, rateLimiter,
 } from "../apps/server/util.js";
 
 test("handle fields are type-checked, not coerced", () => {
@@ -110,6 +110,46 @@ test("lockout does not grow without bound", () => {
   const now = 1_000_000;
   for (let i = 0; i < 500; i++) lo.fail("handle" + i, now);
   assert.ok(lo.size() <= 50, `expected the map to stay capped, got ${lo.size()}`);
+});
+
+test("rate limiter starts full and blocks once capacity is spent", () => {
+  const limit = rateLimiter({ capacity: 3, refillPerSec: 1 });
+  const now = 1_000_000;
+  assert.equal(limit("kirito", 1, now), true);
+  assert.equal(limit("kirito", 1, now), true);
+  assert.equal(limit("kirito", 1, now), true);
+  assert.equal(limit("kirito", 1, now), false, "the fourth call in the same instant must be refused");
+});
+
+test("rate limiter refills over time but never past capacity", () => {
+  const limit = rateLimiter({ capacity: 5, refillPerSec: 2 });
+  const now = 1_000_000;
+  for (let i = 0; i < 5; i++) assert.equal(limit("asuna", 1, now), true);
+  assert.equal(limit("asuna", 1, now), false, "empty right after the burst");
+  // 2 tokens/sec, waited 1s -> 2 tokens back, enough for exactly two more calls.
+  assert.equal(limit("asuna", 1, now + 1000), true);
+  assert.equal(limit("asuna", 1, now + 1000), true);
+  assert.equal(limit("asuna", 1, now + 1000), false);
+  // A long idle period must not let the bucket overflow past capacity.
+  assert.equal(limit("asuna", 5, now + 60_000), true, "a full refill must top out at capacity, not beyond");
+  assert.equal(limit("asuna", 1, now + 60_000), false);
+});
+
+test("rate limiter cost can spend more than one token at once", () => {
+  const limit = rateLimiter({ capacity: 10, refillPerSec: 0 });
+  const now = 1_000_000;
+  assert.equal(limit("lookup", 4, now), true);
+  assert.equal(limit("lookup", 4, now), true);
+  assert.equal(limit("lookup", 4, now), false, "only 2 tokens left, a cost of 4 must be refused");
+  assert.equal(limit("lookup", 2, now), true, "but the remaining 2 tokens still work");
+});
+
+test("rate limiter buckets are independent per key", () => {
+  const limit = rateLimiter({ capacity: 1, refillPerSec: 0 });
+  const now = 1_000_000;
+  assert.equal(limit("kirito", 1, now), true);
+  assert.equal(limit("kirito", 1, now), false, "kirito's single token is spent");
+  assert.equal(limit("asuna", 1, now), true, "a different key must not be affected by kirito's bucket");
 });
 
 test("handle format matches what the account routes accept", () => {
