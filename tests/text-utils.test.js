@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining, normalizeFile, truncateFilename } from "../apps/web/src/text-utils.js";
+import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining, normalizeFile, truncateFilename, videoFallbackHtml } from "../apps/web/src/text-utils.js";
 
 test("esc escapes every HTML-significant character used to render messages", () => {
   assert.equal(esc("<script>alert('hi')</script>"), "&lt;script&gt;alert(&#39;hi&#39;)&lt;/script&gt;");
@@ -41,6 +41,26 @@ test("mimeKind buckets image/video/audio mimes and rejects everything else", () 
   assert.equal(mimeKind("application/pdf"), "");
   assert.equal(mimeKind(""), "");
   assert.equal(mimeKind(undefined), "");
+});
+
+test("videoFallbackHtml renders a download link with the file name and blob url", () => {
+  const html = videoFallbackHtml("clip.mov", "blob:https://chat.noblesoul.tech/abc-123");
+  assert.match(html, /can't play in this browser/);
+  assert.match(html, /href="blob:https:\/\/chat\.noblesoul\.tech\/abc-123"/);
+  assert.match(html, /download="clip\.mov"/);
+  assert.match(html, /<b>clip\.mov<\/b>/);
+});
+
+test("videoFallbackHtml escapes an untrusted file name so it can't inject markup", () => {
+  const html = videoFallbackHtml('<img src=x onerror=alert(1)>.mov', "blob:x");
+  assert.doesNotMatch(html, /<img/);
+  assert.match(html, /&lt;img/);
+});
+
+test("videoFallbackHtml falls back to a generic name when none is given", () => {
+  const html = videoFallbackHtml("", "blob:x");
+  assert.match(html, /<b>file<\/b>/);
+  assert.match(html, /download="file"/);
 });
 
 test("fmtSize stays in bytes under 1 KB, whole KB under 1 MB, one decimal MB above", () => {

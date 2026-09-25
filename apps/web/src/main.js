@@ -10,7 +10,7 @@ import {
 } from "../../../packages/net/src/serialize.js";
 import { toB64, fromB64, poissonDelay, keysFingerprint } from "../../../packages/crypto/src/util.js";
 import { deriveAuthSecret } from "../../../packages/crypto/src/authsecret.js";
-import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining, normalizeFile, truncateFilename, normalizeProfile, normalizeReply } from "./text-utils.js";
+import { esc, simpleHash, fileMime, mimeKind, fmtSize, fmtRemaining, normalizeFile, truncateFilename, normalizeProfile, normalizeReply, videoFallbackHtml } from "./text-utils.js";
 import { parsePinsJson, pinsToObject, mergeSyncedPin } from "./pin-utils.js";
 import { ownDevicesOnly } from "./card-utils.js";
 import { reactionsAfterToggle, canUnsend, trimHistory, shouldStickToBottom } from "./message-utils.js";
@@ -1357,7 +1357,18 @@ async function openAttachment(m, node) {
     const urlObj = URL.createObjectURL(blob);
     const kind = mimeKind(f.mime);
     if (kind === "image") { node.innerHTML = `<img src="${urlObj}" alt="${esc(f.name)}" draggable="false">`; node.dataset.loaded = "1"; node.dataset.kind = "image"; node.dataset.url = urlObj; node.dataset.name = f.name || ""; openLightbox(node); }
-    else if (kind === "video") { node.innerHTML = `<video src="${urlObj}" controls controlslist="nodownload noremoteplayback" disablepictureinpicture draggable="false" playsinline preload="metadata"></video>`; node.dataset.loaded = "1"; node.dataset.kind = "video"; }
+    else if (kind === "video") {
+      node.innerHTML = `<video src="${urlObj}" controls controlslist="nodownload noremoteplayback" disablepictureinpicture draggable="false" playsinline preload="metadata"></video>`;
+      node.dataset.loaded = "1"; node.dataset.kind = "video";
+      // some formats (HEVC-encoded .mov is the common case on Android/iPhone
+      // uploads) decode fine on the sender's device but not in every browser;
+      // without this the recipient just sees a dead black box with no way to
+      // get at the file, so fall back to a download link instead
+      node.querySelector("video").addEventListener("error", () => {
+        node.innerHTML = videoFallbackHtml(f.name, urlObj);
+        node.dataset.kind = "file";
+      }, { once: true });
+    }
     else if (kind === "audio") { node.innerHTML = `<div class="att-audio"><div class="att-audio-name">🎵 ${esc(f.name)}</div><audio src="${urlObj}" controls preload="metadata"></audio></div>`; node.dataset.loaded = "1"; node.dataset.kind = "audio"; }
     else {
       const a = document.createElement("a"); a.href = urlObj; a.download = f.name || "file"; a.click();
