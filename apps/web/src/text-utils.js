@@ -47,6 +47,17 @@ export function mimeKind(mime) {
   return m.startsWith("image/") ? "image" : m.startsWith("video/") ? "video" : m.startsWith("audio/") ? "audio" : "";
 }
 
+// markup shown when a <video> element fails to play, e.g. a HEVC-encoded
+// .mov that Chrome/Android cannot decode. The browser's error event carries
+// no useful detail for the user, so a decode failure would otherwise just
+// leave a dead black box in the chat with no way to get at the file at all.
+// Falls back to the same plain download-link look as an unrecognized
+// attachment type.
+export function videoFallbackHtml(name, url) {
+  const safeName = esc(name || "file");
+  return `<div class="att-file"><span class="att-ic">🎬</span><span class="att-meta"><b>${safeName}</b><span>can't play in this browser · <a href="${esc(url)}" download="${safeName}">download instead</a></span></span></div>`;
+}
+
 // human-readable file size for attachment rows (B/KB/MB, no fractional bytes).
 // Round into the KB bucket first and check it still fits there before
 // printing it, same fix as fmtRemaining below: a file just under 1 MB (e.g.
