@@ -18,6 +18,7 @@ import { addedMembers } from "./group-utils.js";
 import { unlocks, isUnlocked, markUnlocked } from "./gate.js";
 import { putKey, getKey, clearKeys } from "./keystore.js";
 import { isTurnServer } from "./ice-utils.js";
+import { reconnectDelay } from "./reconnect-utils.js";
 
 // Name the blob key is filed under in IndexedDB.
 const BLOB_KEY_NAME = "blob";
@@ -37,6 +38,7 @@ const state = {
   soundOn: true, muted: new Set(), blocked: new Set(), unread: new Map(),
   presence: new Map(), presenceTimer: null, histTimer: null, expireTimer: null,
   replyingTo: null, groups: new Map(), call: null, pins: new Map(),
+  reconnectAttempts: 0,
 };
 
 const ls = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* */ } }, del: (k) => { try { localStorage.removeItem(k); } catch { /* */ } } };
@@ -607,6 +609,7 @@ function connectWS() {
   const ws = new WebSocket(`${proto}://${location.host}/gateway`);
   state.ws = ws;
   ws.addEventListener("open", () => {
+    state.reconnectAttempts = 0;
     ws.send(JSON.stringify({ t: "subscribe", token: state.token, provider: toB64(state.identity.providerId), mailbox: toB64(state.identity.mailbox) }));
     if (state.coverOn) scheduleCover();
   });
@@ -623,7 +626,7 @@ function connectWS() {
     // 4001 = the gateway rejected the subscription (expired/invalid session).
     // Reconnecting would just loop, so send the user back to sign-in instead.
     if (ev.code === 4001) { toast("session expired, please sign in again"); clearSession(); location.reload(); return; }
-    setTimeout(connectWS, 1500);
+    setTimeout(connectWS, reconnectDelay(state.reconnectAttempts++));
   });
 }
 // Reconnect the gateway socket when it is not open. Mobile browsers freeze or
