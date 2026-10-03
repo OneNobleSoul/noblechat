@@ -14,7 +14,13 @@ REPO_SLUG="${REPO_SLUG:-OneNobleSoul/noblechat}"
 BRANCH="${BRANCH:-main}"
 TOKEN_FILE="${TOKEN_FILE:-/root/.noblechat-deploy-token}"
 LOG="${LOG:-/root/noblechat-autodeploy.log}"
-LOCK="/run/noblechat-autodeploy.lock"
+LOCK="${LOCK:-/run/noblechat-autodeploy.lock}"
+# Last revision that was deployed successfully. The checkout alone is not enough
+# to tell: the reset below moves HEAD before the build runs, so after a failed
+# build HEAD already equals the remote and the poller would never try again.
+STATE_FILE="${STATE_FILE:-/root/.noblechat-deployed-sha}"
+FAIL_FILE="${FAIL_FILE:-/root/.noblechat-deploy-failed}"
+RETRY_SECS="${RETRY_SECS:-900}"
 
 log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >>"$LOG"; }
 
@@ -24,17 +30,40 @@ if ! flock -n 9; then
   exit 0
 fi
 
-[ -f "$TOKEN_FILE" ] || { log "ERROR token file $TOKEN_FILE missing"; exit 1; }
-TOKEN="$(tr -d '\r\n' <"$TOKEN_FILE")"
-REMOTE_URL="https://${TOKEN}@github.com/${REPO_SLUG}.git"
+if [ -z "${REMOTE_URL:-}" ]; then
+  [ -f "$TOKEN_FILE" ] || { log "ERROR token file $TOKEN_FILE missing"; exit 1; }
+  TOKEN="$(tr -d '\r\n' <"$TOKEN_FILE")"
+  REMOTE_URL="https://${TOKEN}@github.com/${REPO_SLUG}.git"
+fi
 
 remote_sha="$(git ls-remote "$REMOTE_URL" "refs/heads/${BRANCH}" | cut -f1)"
 [ -n "$remote_sha" ] || { log "ERROR could not read remote sha"; exit 1; }
-local_sha="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || echo none)"
+if [ -s "$STATE_FILE" ]; then
+  local_sha="$(tr -d '\r\n' <"$STATE_FILE")"
+elif [ -f "$FAIL_FILE" ]; then
+  # No successful deploy on record and the last attempt failed after the reset.
+  local_sha=none
+else
+  local_sha="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || echo none)"
+fi
 
 if [ "$remote_sha" = "$local_sha" ]; then
   exit 0
 fi
+
+# A revision that failed to deploy is retried, but not on every two minute tick.
+if [ -f "$FAIL_FILE" ]; then
+  read -r failed_sha failed_at <"$FAIL_FILE" || true
+  if [ "${failed_sha:-}" = "$remote_sha" ] && [ $(( $(date +%s) - ${failed_at:-0} )) -lt "$RETRY_SECS" ]; then
+    exit 0
+  fi
+fi
+
+fail() {
+  log "ERROR $1"
+  echo "$remote_sha $(date +%s)" >"$FAIL_FILE"
+  exit 1
+}
 
 log "update: $local_sha -> $remote_sha, deploying"
 cd "$REPO_DIR"
@@ -55,7 +84,7 @@ gateway_ok() {
 
 # 1. Build the image up front - no containers are touched, so no downtime.
 if ! docker compose build >>"$LOG" 2>&1; then
-  log "ERROR build failed; see docker output above"; exit 1
+  fail "build failed; see docker output above"
 fi
 
 # 2. Recreate ONLY the gateway with the new image and confirm it serves, so the
@@ -66,7 +95,7 @@ for attempt in 1 2 3 4 5; do
   gateway_ok && break
   log "gateway not up yet after targeted start (attempt $attempt)"
 done
-if ! gateway_ok; then log "ERROR gateway did not come up; manual attention needed"; exit 1; fi
+if ! gateway_ok; then fail "gateway did not come up; manual attention needed"; fi
 
 # 3. Reconcile every OTHER service (mix nodes, providers, db, nym-client) now
 #    that the site already serves. Explicitly excluding the gateway keeps a plain
@@ -74,5 +103,7 @@ if ! gateway_ok; then log "ERROR gateway did not come up; manual attention neede
 others=$(docker compose config --services 2>/dev/null | grep -vx noblechat | tr '\n' ' ')
 docker compose up -d --no-deps $others >>"$LOG" 2>&1 || true
 gateway_ok || { docker compose up -d --no-deps noblechat >>"$LOG" 2>&1 || true; }
+echo "$remote_sha" >"$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+rm -f "$FAIL_FILE"
 log "deploy ok, now at $(git rev-parse HEAD)"
 exit 0
