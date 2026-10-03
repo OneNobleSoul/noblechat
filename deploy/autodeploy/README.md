@@ -5,6 +5,10 @@ timer polls the remote HEAD every two minutes; when the deployed revision is
 behind, it fast-forwards the checkout and runs `docker compose up -d --build`.
 If the remote and deployed revisions match it is a no-op, so the poll is cheap.
 
+The last successfully deployed revision is kept in `/root/.noblechat-deployed-sha`.
+If a build fails, the same revision is retried after 15 minutes instead of being
+mistaken for deployed just because the checkout already moved.
+
 No secret lives in GitHub. The only credential is a token that can read the
 (private) repo, kept in a root-only file on the host.
 
