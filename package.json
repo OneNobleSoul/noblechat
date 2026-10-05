@@ -18,8 +18,8 @@
     "@noble/hashes": "^1.8.0",
     "@noble/post-quantum": "^0.4.1",
     "@nymproject/sdk-full-fat": "^1.4.1",
-    "pg": "^8.23.0",
-    "ws": "^8.21.3"
+    "pg": "^8.23.1",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "esbuild": "^0.28.2"
