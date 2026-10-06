@@ -152,8 +152,8 @@
 
 <!-- NEW GROUP dialog -->
 <div id="settings-modal" class="modal" hidden>
-  <div class="modal-card">
-    <div class="modal-title">Settings</div>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div id="settings-title" class="modal-title">Settings</div>
     <div class="set-sec">
       <div class="set-label">Profile</div>
       <label for="set-name" class="set-flabel">Display name</label>
@@ -199,15 +199,15 @@
 </div>
 
 <div id="changelog-modal" class="modal" hidden>
-  <div class="modal-card">
-    <div class="modal-title">What's new</div>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="changelog-title">
+    <div id="changelog-title" class="modal-title">What's new</div>
     <div id="changelog-body" class="changelog-body"></div>
     <div class="modal-actions"><button id="changelog-close" class="btn ghost">Close</button></div>
   </div>
 </div>
 
 <div id="profile-modal" class="modal" hidden>
-  <div class="modal-card pv-card">
+  <div class="modal-card pv-card" role="dialog" aria-modal="true" aria-labelledby="pv-name">
     <button id="pv-close" class="lb-close" aria-label="Close">✕</button>
     <div id="pv-banner" class="pv-banner"></div>
     <div id="pv-avatar" class="pv-avatar"></div>
@@ -218,8 +218,8 @@
 </div>
 
 <div id="group-modal" class="modal" hidden>
-  <div class="modal-card">
-    <div class="modal-title">New group</div>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="group-title">
+    <div id="group-title" class="modal-title">New group</div>
     <label for="group-name">Group name</label>
     <input id="group-name" placeholder="e.g. friends" maxlength="60" autocomplete="off">
     <label>Members</label>
