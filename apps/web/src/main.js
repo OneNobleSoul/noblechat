@@ -1823,8 +1823,12 @@ function startCallTimer() {
 function showIncoming(peer, video) {
   const el = ensureEl("call-incoming", "call-incoming");
   el.innerHTML = `<div class="ci-card"><div class="ci-avatar">${esc(peer[0] || "?").toUpperCase()}</div><div class="ci-name">${esc(peer)}</div><div class="ci-sub">incoming ${video ? "video" : "voice"} call…</div><div class="ci-actions"><button id="ci-reject" class="call-btn hangup" title="Decline" aria-label="Decline call">✕</button><button id="ci-accept" class="call-btn accept" title="Accept" aria-label="Accept call">📞</button></div></div>`;
+  el.setAttribute("role", "alertdialog");
+  el.setAttribute("aria-modal", "true");
+  el.setAttribute("aria-label", `Incoming ${video ? "video" : "voice"} call from ${peer}`);
   el.hidden = false;
   $("#ci-accept").onclick = acceptCall; $("#ci-reject").onclick = rejectCall;
+  $("#ci-accept").focus();
 }
 function hideIncoming() { const el = document.getElementById("call-incoming"); if (el) el.hidden = true; }
 function showCall() {
