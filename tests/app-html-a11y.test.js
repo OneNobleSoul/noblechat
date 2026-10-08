@@ -17,3 +17,14 @@ test("each modal card is a labelled aria-modal dialog", () => {
     assert.ok(html.includes(`id="${ref[1]}"`), `${id} points at missing #${ref[1]}`);
   }
 });
+
+// The ringing screen covers the whole page, so it needs to announce itself and
+// hand keyboard focus to the accept button instead of leaving it behind the overlay.
+test("incoming call overlay is an alertdialog and takes focus", () => {
+  const src = readFileSync(new URL("../apps/web/src/main.js", import.meta.url), "utf8");
+  const fn = src.slice(src.indexOf("function showIncoming"), src.indexOf("function hideIncoming"));
+  assert.match(fn, /setAttribute\("role", "alertdialog"\)/);
+  assert.match(fn, /setAttribute\("aria-modal", "true"\)/);
+  assert.match(fn, /setAttribute\("aria-label"/);
+  assert.match(fn, /\$\("#ci-accept"\)\.focus\(\)/);
+});
