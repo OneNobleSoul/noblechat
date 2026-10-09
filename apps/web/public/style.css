@@ -98,6 +98,7 @@ input{font-family:var(--sans)}
 .msg.out{align-self:flex-end;background:linear-gradient(160deg,var(--accent),#2dd4bf);color:#04120f;border-bottom-right-radius:4px}
 .msg.in{align-self:flex-start;background:var(--panel-2);border:1px solid var(--line);border-bottom-left-radius:4px}
 .msg{cursor:pointer}
+.msg:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .msg-sender{font-size:11.5px;font-weight:600;color:var(--accent);margin-bottom:2px}
 .avatar.group{background:linear-gradient(140deg,#7c8cff,#a855f7);font-size:16px}
 /* new-group modal */
