@@ -28,3 +28,15 @@ test("incoming call overlay is an alertdialog and takes focus", () => {
   assert.match(fn, /setAttribute\("aria-label"/);
   assert.match(fn, /\$\("#ci-accept"\)\.focus\(\)/);
 });
+
+// Message bubbles open a react/reply/delete menu on click. Keyboard users need
+// to reach and open it too, and get back to the bubble when Escape closes it.
+test("message bubbles are focusable and open their menu from the keyboard", () => {
+  const src = readFileSync(new URL("../apps/web/src/main.js", import.meta.url), "utf8");
+  const fn = src.slice(src.indexOf("function renderMessages"), src.indexOf("const QUICK_REACTS"));
+  assert.match(fn, /n\.tabIndex = 0/);
+  assert.match(fn, /e\.key === "Enter"/);
+  assert.match(fn, /openMessageMenu\(state\.active, msgs\[Number\(n\.dataset\.mi\)\], n, true\)/);
+  assert.match(src, /if \(viaKeyboard\) pop\.querySelector\("button"\)\?\.focus\(\)/);
+  assert.match(src, /msg-menu-pop"\);\s*\n\s*if \(mm && !mm\.hidden\)/);
+});

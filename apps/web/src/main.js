@@ -1317,14 +1317,29 @@ function renderMessages() {
     a.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activate(e); } });
   });
   el.querySelectorAll(".rc").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); toggleReaction(state.active, msgs[Number(b.closest(".msg").dataset.mi)], b.dataset.emoji); }));
-  el.querySelectorAll(".msg").forEach((n) => n.addEventListener("click", (e) => { if (e.target.closest(".att,.rc,.reply-quote")) return; e.stopPropagation(); openMessageMenu(state.active, msgs[Number(n.dataset.mi)], n); }));
+  el.querySelectorAll(".msg").forEach((n) => {
+    n.tabIndex = 0;
+    n.setAttribute("aria-haspopup", "menu");
+    n.addEventListener("click", (e) => { if (e.target.closest(".att,.rc,.reply-quote")) return; e.stopPropagation(); openMessageMenu(state.active, msgs[Number(n.dataset.mi)], n); });
+    // keyboard users get the same react/reply/copy/delete menu; only when the
+    // bubble itself has focus so the attachment and reaction buttons inside keep their own keys
+    n.addEventListener("keydown", (e) => {
+      if (e.target !== n) return;
+      if (e.key === "Enter" || e.key === " " || e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
+        e.preventDefault(); e.stopPropagation();
+        openMessageMenu(state.active, msgs[Number(n.dataset.mi)], n, true);
+      }
+    });
+  });
   el.dataset.convo = String(state.active || "");
   if (stick) el.scrollTop = el.scrollHeight;
 }
 // popover with quick reactions + reply/copy/delete for a single message
 const QUICK_REACTS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
-function openMessageMenu(peer, msg, anchor) {
+let msgMenuAnchor = null;
+function openMessageMenu(peer, msg, anchor, viaKeyboard = false) {
   if (!msg) return;
+  msgMenuAnchor = anchor;
   const existing = document.getElementById("msg-menu-pop");
   const pop = existing || Object.assign(document.createElement("div"), { id: "msg-menu-pop", className: "menu-pop" });
   if (!existing) document.body.appendChild(pop);
@@ -1346,6 +1361,7 @@ function openMessageMenu(peer, msg, anchor) {
   const below = r.bottom + 4; const wantAbove = below > window.innerHeight - 180;
   if (wantAbove) { pop.style.bottom = `${window.innerHeight - r.top + 4}px`; pop.style.top = "auto"; } else { pop.style.top = `${below}px`; pop.style.bottom = "auto"; }
   closeMenus(); pop.hidden = false; pop.classList.add("open");
+  if (viaKeyboard) pop.querySelector("button")?.focus();
 }
 async function openAttachment(m, node) {
   if (!m || !m.file || node.dataset.loading) return;
@@ -1397,6 +1413,11 @@ function closeLightbox() { const lb = document.getElementById("lightbox"); if (l
 // Escape closes whichever modal-like overlay is currently open, topmost first.
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
+  const mm = document.getElementById("msg-menu-pop");
+  if (mm && !mm.hidden) {
+    const back = msgMenuAnchor && msgMenuAnchor.isConnected && mm.contains(document.activeElement) ? msgMenuAnchor : null;
+    closeMenus(); if (back) back.focus(); return;
+  }
   const lb = document.getElementById("lightbox");
   if (lb && !lb.hidden) { closeLightbox(); return; }
   const clm = document.getElementById("changelog-modal");
