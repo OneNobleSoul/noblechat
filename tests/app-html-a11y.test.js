@@ -40,3 +40,14 @@ test("message bubbles are focusable and open their menu from the keyboard", () =
   assert.match(src, /if \(viaKeyboard\) pop\.querySelector\("button"\)\?\.focus\(\)/);
   assert.match(src, /msg-menu-pop"\);\s*\n\s*if \(mm && !mm\.hidden\)/);
 });
+
+// The sign in / create account switch and the sound button are toggles. Without
+// aria-pressed a screen reader cannot tell which side is currently selected.
+test("auth tabs and sound toggle expose their state", () => {
+  const src = readFileSync(new URL("../apps/web/src/main.js", import.meta.url), "utf8");
+  const auth = src.slice(src.indexOf("function showAuth"), src.indexOf("setMode(\"login\");"));
+  assert.match(auth, /#tab-login\"\)\.setAttribute\(\"aria-pressed\"/);
+  assert.match(auth, /#tab-register\"\)\.setAttribute\(\"aria-pressed\"/);
+  const snd = src.slice(src.indexOf("function renderSoundToggle"), src.indexOf("function renderSoundToggle") + 400);
+  assert.match(snd, /setAttribute\(\"aria-pressed\", String\(state\.soundOn\)\)/);
+});
