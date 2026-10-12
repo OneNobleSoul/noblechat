@@ -236,6 +236,8 @@ function showAuth() {
     state.authMode = m;
     $("#tab-login").classList.toggle("active", m === "login");
     $("#tab-register").classList.toggle("active", m === "register");
+    $("#tab-login").setAttribute("aria-pressed", String(m === "login"));
+    $("#tab-register").setAttribute("aria-pressed", String(m === "register"));
     $("#auth-go").textContent = m === "login" ? "Sign in" : "Create account";
     $("#auth-pass").setAttribute("autocomplete", m === "login" ? "current-password" : "new-password");
   };
@@ -1443,7 +1445,7 @@ function scheduleCover() { clearTimeout(state.coverTimer); state.coverTimer = se
 function sendCover() { if (!state.ws || state.ws.readyState !== 1) return; try { activeTransport().submit(state.identity.card, { t: "cover", ts: 0 }); state.stats.cover++; updateStats(); emitPacket(""); } catch { /* */ } }
 
 // ---------- notification sound toggle ----------
-function renderSoundToggle() { const b = $("#sound-toggle"); if (!b) return; b.textContent = state.soundOn ? "🔔" : "🔕"; b.classList.toggle("on", state.soundOn); b.title = state.soundOn ? "Message sound: on" : "Message sound: off"; }
+function renderSoundToggle() { const b = $("#sound-toggle"); if (!b) return; b.textContent = state.soundOn ? "🔔" : "🔕"; b.classList.toggle("on", state.soundOn); b.setAttribute("aria-pressed", String(state.soundOn)); b.title = state.soundOn ? "Message sound: on" : "Message sound: off"; }
 function toggleSound() {
   state.soundOn = !state.soundOn; savePrefs(); renderSoundToggle();
   if (state.soundOn) { beep(); toast("message sound on"); } else toast("message sound off");
