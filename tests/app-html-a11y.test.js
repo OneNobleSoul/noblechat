@@ -51,3 +51,15 @@ test("auth tabs and sound toggle expose their state", () => {
   const snd = src.slice(src.indexOf("function renderSoundToggle"), src.indexOf("function renderSoundToggle") + 400);
   assert.match(snd, /setAttribute\(\"aria-pressed\", String\(state\.soundOn\)\)/);
 });
+
+// The admin page strips the default input outline, so keyboard users need an
+// explicit ring on inputs, buttons and links or they lose track of the focus.
+test("admin page keeps a visible keyboard focus ring", () => {
+  const css = readFileSync(new URL("../apps/web/public/admin.css", import.meta.url), "utf8");
+  const rule = css.match(/([^{}]*:focus-visible[^{}]*)\{([^}]*)\}/);
+  assert.ok(rule, "admin.css needs a :focus-visible rule");
+  for (const sel of ["input", "textarea", ".btn", "a"]) {
+    assert.ok(rule[1].includes(`${sel}:focus-visible`), `${sel} needs a focus ring`);
+  }
+  assert.match(rule[2], /outline:\s*2px solid/);
+});
